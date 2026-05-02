@@ -9,7 +9,7 @@ Chromeのページ内入力欄だけで動く、SKK風の最小実装です。
 1. Chromeで `chrome://extensions` を開く
 2. 右上の「デベロッパーモード」をON
 3. 「パッケージ化されていない拡張機能を読み込む」
-4. `dist/chrome-skk-lite` を選択
+4. `build/chrome-skk-lite` を選択
 5. 入力欄で試す
 
 ## キー操作
@@ -50,6 +50,6 @@ Chromeの新規タブや初期表示のGoogle検索欄など、拡張機能のco
 
 - `https://skk-dev.github.io/dict/` から指定した `SKK-JISYO.*.gz` を取得
 - `compiled/dictionary.json` を再生成
-- Chrome にそのまま読み込める最小構成を `dist/chrome-skk-lite` に出力
+- Chrome にそのまま読み込める最小構成を `build/chrome-skk-lite` に出力
 
-`dist/chrome-skk-lite` に入るのは、拡張実行に必要なファイルと `compiled/dictionary.json` だけです。
+`build/chrome-skk-lite` に入るのは、拡張実行に必要なファイルと `compiled/dictionary.json` だけです。

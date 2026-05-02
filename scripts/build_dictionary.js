@@ -105,6 +105,7 @@ async function main() {
   const packageCompiledFile = path.join(packageCompiledDir, "dictionary.json");
   const dictionaryJson = JSON.stringify(dict);
 
+  fs.rmSync(packageDir, { recursive: true, force: true });
   ensureDirectory(COMPILED_DIR);
   ensureDirectory(packageCompiledDir);
   fs.writeFileSync(COMPILED_FILE, dictionaryJson);

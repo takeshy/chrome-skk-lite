@@ -7,7 +7,7 @@
     "SKK-JISYO.propernoun",
     "SKK-JISYO.station"
   ],
-  "packageDirectory": "dist/chrome-skk-lite",
+  "packageDirectory": "build/chrome-skk-lite",
   "runtimeFiles": [
     "manifest.json",
     "background.js",
