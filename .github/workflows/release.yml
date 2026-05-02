@@ -22,7 +22,7 @@ jobs:
           node-version: 22
 
       - name: Build extension package
-        run: node scripts/build_dictionary.js
+        run: node build_extension.js
 
       - name: Create release archive
         run: |

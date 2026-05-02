@@ -24,6 +24,7 @@
   let indicatorBadge = null;
   let registerModal = null;
   let registerModalEls = null;
+  const EDITABLE_INPUT_TYPES = new Set(["text", "search", "tel", "url", "email"]);
 
   const state = {
     enabled: false,
@@ -301,7 +302,32 @@
   }
 
   function isHandledPrintableKey(key) {
-    return /^[a-zA-Z,\.\-\[\]]$/.test(key);
+    if (key.length !== 1) return false;
+    const code = key.charCodeAt(0);
+    return (
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      code === 44 ||
+      code === 45 ||
+      code === 46 ||
+      code === 91 ||
+      code === 93
+    );
+  }
+
+  function isUpperAsciiLetter(ch) {
+    if (ch.length !== 1) return false;
+    const code = ch.charCodeAt(0);
+    return code >= 65 && code <= 90;
+  }
+
+  function isToggleKeyEvent(e) {
+    if (!e.ctrlKey) return false;
+    const code = e.keyCode;
+    if (code === 74 || code === 77) return true;
+    if (e.key.length !== 1) return false;
+    const keyCode = e.key.charCodeAt(0) | 32;
+    return keyCode === 106 || keyCode === 109;
   }
 
   function setTargetElement(el) {
@@ -356,8 +382,7 @@
     if (tag === "textarea") return true;
     if (tag !== "input") return false;
     const type = (el.getAttribute("type") || "text").toLowerCase();
-    const editableTypes = ["text", "search", "tel", "url", "email"];
-    return editableTypes.includes(type) || !el.hasAttribute("type");
+    return EDITABLE_INPUT_TYPES.has(type) || !el.hasAttribute("type");
   }
 
   function dispatchInput(el) {
@@ -771,7 +796,7 @@
     e.stopImmediatePropagation();
     setTargetElement(el);
 
-    if (/[A-Z]/.test(ch)) {
+    if (isUpperAsciiLetter(ch)) {
       if (!state.composing) {
         startComposition(el);
       } else if (engine.shouldStartOkuri(state, ch)) {
@@ -790,7 +815,9 @@
     while (state.roman && guard++ < 4) {
       if (!convertRomanChunk(el)) break;
     }
-    void autoConvertOkuri(el);
+    if (state.composing && state.okuriKey && state.okuriKana && !state.roman && !state.candidates.length) {
+      void autoConvertOkuri(el);
+    }
     return true;
   }
 
@@ -826,11 +853,10 @@
     return true;
   }
 
-  document.addEventListener("keydown", async (e) => {
-    const el = getDeepActiveElement(document);
-    const isRegisterInput = isRegisterInputElement(el);
-
-    if (e.ctrlKey && (e.key.toLowerCase() === "j" || e.keyCode === 74 || e.key.toLowerCase() === "m" || e.keyCode === 77)) {
+  document.addEventListener("keydown", (e) => {
+    if (isToggleKeyEvent(e)) {
+      const el = getDeepActiveElement(document);
+      const isRegisterInput = isRegisterInputElement(el);
       if (state.enabled && state.composing && state.showingCandidate && !isRegisterInput) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -858,6 +884,7 @@
 
     if (!state.enabled) return;
 
+    const el = getDeepActiveElement(document);
     const isEdit = isEditable(el);
     if (!isEdit) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -904,7 +931,7 @@
       if (state.composing) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        await showNextCandidate(el);
+        void showNextCandidate(el);
       }
       return;
     }

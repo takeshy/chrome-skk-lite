@@ -44,14 +44,33 @@ Chromeのページ内入力欄だけで動く、SKK風の最小実装です。
 Chromeの新規タブや初期表示のGoogle検索欄など、拡張機能のcontent scriptが入れないブラウザ内蔵ページでは動きません。通常のWebページを開いてから使ってください。
 パスワード欄、メール/URL/数字専用inputなどでは動かないようにしています。
 
-## 辞書ビルド
+## 自前でビルドする
 
-使用する辞書は `scripts/dictionary_sources.json` の `dictionaries` に列挙します。
+GitHub Actions などは不要です。手元の環境で辞書を取得して、Chrome に読み込む拡張ディレクトリを生成できます。
 
-`node scripts/build_dictionary.js` を実行すると、次を行います。
+前提:
+
+- Node.js 22 以降
+- `https://skk-dev.github.io/dict/` にアクセスできるネットワーク環境
+
+手順:
+
+1. このリポジトリのルートで次を実行します。
+
+   ```sh
+   node build_extension.js
+   ```
+
+2. ビルドが終わると `build/chrome-skk-lite` が生成されます。
+
+3. Chrome で `chrome://extensions` を開き、「パッケージ化されていない拡張機能を読み込む」から `build/chrome-skk-lite` を選択します。
+
+`node build_extension.js` は次を行います。
 
 - `https://skk-dev.github.io/dict/` から指定した `SKK-JISYO.*.gz` を取得
 - `compiled/dictionary.json` を再生成
 - Chrome にそのまま読み込める最小構成を `build/chrome-skk-lite` に出力
 
 `build/chrome-skk-lite` に入るのは、拡張実行に必要なファイルと `compiled/dictionary.json` だけです。
+
+使用する辞書を変更したい場合は、`dictionary_sources.json` の `dictionaries` を編集してから、同じコマンドを再実行してください。

@@ -3,8 +3,8 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const decoder = new TextDecoder("euc-jp");
 
-const ROOT = path.resolve(__dirname, "..");
-const BUILD_CONFIG_FILE = path.join(__dirname, "dictionary_sources.json");
+const ROOT = __dirname;
+const BUILD_CONFIG_FILE = path.join(ROOT, "dictionary_sources.json");
 const COMPILED_DIR = path.join(ROOT, "compiled");
 const COMPILED_FILE = path.join(COMPILED_DIR, "dictionary.json");
 

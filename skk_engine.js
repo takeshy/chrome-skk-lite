@@ -45,6 +45,8 @@
   };
 
   const SMALL_TSU_RE = /^([bcdfghjklmpqrstvwxyz])\1/;
+  const SMALL_TSU_CONSONANTS = new Set("bcdfghjklmpqrstvwxyz");
+  const N_FOLLOWERS = new Set("aiueoyn");
 
   function preeditKana(state) {
     return (state.kana || "") + (state.okuriKana || "");
@@ -66,20 +68,21 @@
   }
 
   function shouldStartOkuri(state, key) {
-    return /^[A-Z]$/.test(key) && !!state.composing && !state.okuriKey && !!state.kana;
+    if (key.length !== 1) return false;
+    const code = key.charCodeAt(0);
+    return code >= 65 && code <= 90 && !!state.composing && !state.okuriKey && !!state.kana;
   }
 
   function consumeRomanChunk(state) {
     const r = state.roman.toLowerCase();
 
-    const small = r.match(SMALL_TSU_RE);
-    if (small && r.length >= 2) {
+    if (r.length >= 2 && r[0] === r[1] && SMALL_TSU_CONSONANTS.has(r[0])) {
       state.roman = r.slice(1);
       appendComposingKana(state, "っ");
       return "っ";
     }
 
-    if (/^n[^aiueoyn]$/.test(r)) {
+    if (r.length === 2 && r[0] === "n" && !N_FOLLOWERS.has(r[1])) {
       state.roman = r.slice(1);
       appendComposingKana(state, "ん");
       return "ん";
