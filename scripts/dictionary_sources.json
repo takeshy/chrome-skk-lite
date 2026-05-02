@@ -1,0 +1,19 @@
+{
+  "sourceBaseUrl": "https://skk-dev.github.io/dict",
+  "dictionaries": [
+    "SKK-JISYO.L",
+    "SKK-JISYO.geo",
+    "SKK-JISYO.jinmei",
+    "SKK-JISYO.propernoun",
+    "SKK-JISYO.station"
+  ],
+  "packageDirectory": "dist/chrome-skk-lite",
+  "runtimeFiles": [
+    "manifest.json",
+    "background.js",
+    "content.js",
+    "options.html",
+    "options.js",
+    "skk_engine.js"
+  ]
+}

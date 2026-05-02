@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "SKK Lite for Chrome Inputs",
+  "version": "0.1.0",
+  "description": "SKK-like Japanese input only inside Chrome page inputs.",
+  "permissions": [
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "toggle-skk": {
+      "suggested_key": {
+        "default": "Ctrl+J",
+        "linux": "Ctrl+J",
+        "windows": "Ctrl+J"
+      },
+      "description": "Toggle SKK Lite"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "skk_engine.js",
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "options_page": "options.html"
+}
