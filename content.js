@@ -23,6 +23,7 @@
   // fields in web pages via a Chrome content script.
 
   let userDict = {};
+  let candidateHistory = {};
   const lookupCache = new Map();
   let indicatorBadge = null;
   let registerModal = null;
@@ -64,13 +65,24 @@
     lookupCache.clear();
   }
 
-  chrome.storage?.local?.get(["userDict"], (data) => {
+  function syncCandidateHistory(nextCandidateHistory) {
+    candidateHistory = nextCandidateHistory || {};
+    lookupCache.clear();
+  }
+
+  chrome.storage?.local?.get(["userDict", "candidateHistory"], (data) => {
     syncUserDict(data.userDict);
+    syncCandidateHistory(data.candidateHistory);
   });
 
   chrome.storage?.onChanged?.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes.userDict) return;
-    syncUserDict(changes.userDict.newValue);
+    if (areaName !== "local") return;
+    if (changes.userDict) {
+      syncUserDict(changes.userDict.newValue);
+    }
+    if (changes.candidateHistory) {
+      syncCandidateHistory(changes.candidateHistory.newValue);
+    }
   });
 
   function ensureIndicator() {
@@ -398,7 +410,7 @@
       return;
     }
 
-    if (state.enabled && state.composing && state.showingCandidate && state.targetElement) {
+    if (state.enabled && state.composing && state.targetElement) {
       commitCandidate(state.targetElement);
       return;
     }
@@ -720,7 +732,8 @@
       chrome.runtime.sendMessage({ type: "lookup", kana }, (response) => {
         const bgCandidates = response?.candidates || [];
         const userCandidates = userDict[kana] || [];
-        const merged = [...new Set([...userCandidates, ...bgCandidates])];
+        const historyCandidates = candidateHistory[kana] || [];
+        const merged = [...new Set([...historyCandidates, ...userCandidates, ...bgCandidates])];
         lookupCache.set(kana, Promise.resolve(merged));
         resolve(merged);
       });
@@ -729,10 +742,26 @@
     return lookupPromise;
   }
 
+  function rememberCandidateSelection(key, candidate) {
+    if (!key || !candidate) return;
+
+    const nextCandidateHistory = { ...candidateHistory };
+    const existing = Array.isArray(nextCandidateHistory[key]) ? nextCandidateHistory[key] : [];
+    nextCandidateHistory[key] = [candidate, ...existing.filter((item) => item !== candidate)].slice(0, 8);
+    syncCandidateHistory(nextCandidateHistory);
+    lookupCache.delete(key);
+    void storageSet({ candidateHistory: nextCandidateHistory });
+  }
+
   function commitCandidate(el) {
     if (!state.composing) return;
+    const committedKey = lookupKey();
+    const selectedCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
     const text = state.showingCandidate ? candidateText() : preeditKana();
     replacePrevious(el, currentRenderedLength(), text);
+    if (selectedCandidate) {
+      rememberCandidateSelection(committedKey, selectedCandidate);
+    }
     if (state.modalOpen && isRegisterInputElement(el)) {
       clearCompositionState();
       setTargetElement(el);
@@ -949,7 +978,11 @@
       state.candidateIndex = 0;
       state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
-        openRegisterModal();
+        if (state.modalOpen && isRegisterInputElement(el)) {
+          showPreedit(el);
+        } else {
+          openRegisterModal();
+        }
         return;
       }
       showCandidate(el);
@@ -1082,6 +1115,16 @@
 
     if (!preeditKana()) {
       deleteBackward(el, currentRenderedLength());
+      if (state.modalOpen && isRegisterInputElement(el)) {
+        if (el.value) {
+          clearCompositionState();
+          setTargetElement(el);
+          updateIndicator();
+        } else {
+          closeRegisterModal(true);
+        }
+        return true;
+      }
       reset();
       return true;
     }
@@ -1094,7 +1137,7 @@
     if (isToggleKeyEvent(e)) {
       const el = getDeepActiveElement(document);
       const isRegisterInput = isRegisterInputElement(el);
-      if (state.enabled && state.composing && state.showingCandidate && !isRegisterInput) {
+      if (state.enabled && state.composing && !isRegisterInput) {
         e.preventDefault();
         e.stopImmediatePropagation();
         commitCandidate(el);
