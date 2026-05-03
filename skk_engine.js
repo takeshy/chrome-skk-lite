@@ -105,6 +105,29 @@
     );
   }
 
+  function deleteComposingCharBeforeOffset(state, offset) {
+    const prefixLength = HENKAN_PREFIX.length;
+    const kana = preeditKana(state);
+    if (!state.composing || offset <= prefixLength || offset > prefixLength + kana.length) {
+      return false;
+    }
+
+    const kanaIndex = offset - prefixLength - 1;
+    const stemLength = (state.kana || "").length;
+    if (kanaIndex < stemLength) {
+      state.kana = state.kana.slice(0, kanaIndex) + state.kana.slice(kanaIndex + 1);
+    } else {
+      const okuriIndex = kanaIndex - stemLength;
+      state.okuriKana = state.okuriKana.slice(0, okuriIndex) + state.okuriKana.slice(okuriIndex + 1);
+    }
+    state.replacedLength = composingPreedit(state).length;
+    return true;
+  }
+
+  function composingOffsetAfterBackspace(offset) {
+    return Math.max(HENKAN_PREFIX.length, offset - 1);
+  }
+
   function consumeRomanChunk(state) {
     const r = state.roman.toLowerCase();
 
@@ -146,6 +169,8 @@
     appendComposingKana,
     shouldStartOkuri,
     isAbbrevChar,
+    deleteComposingCharBeforeOffset,
+    composingOffsetAfterBackspace,
     consumeRomanChunk
   };
 });

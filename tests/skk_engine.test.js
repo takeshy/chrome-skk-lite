@@ -97,3 +97,16 @@ runTest("abbrev accepts uppercase letters digits and hyphen without roman conver
   assert.equal(engine.isAbbrevChar("/"), false);
   assert.equal(engine.isAbbrevChar(" "), false);
 });
+
+runTest("backspace in the middle of composing preedit deletes matching kana", () => {
+  const state = createState();
+  state.kana = "もりた";
+  state.replacedLength = engine.composingPreedit(state).length;
+
+  const deleted = engine.deleteComposingCharBeforeOffset(state, 3);
+
+  assert.equal(deleted, true);
+  assert.equal(state.kana, "もた");
+  assert.equal(engine.composingPreedit(state), "▽もた");
+  assert.equal(engine.composingOffsetAfterBackspace(3), 2);
+});

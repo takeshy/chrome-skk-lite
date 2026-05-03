@@ -46,6 +46,8 @@
     modalOpen: false,
     modalContext: null,
     replacedLength: 0,
+    renderStart: null,
+    renderEnd: null,
     targetElement: null,
     lastKeyToggleAt: 0,
     lastCommandToggleAt: 0
@@ -380,6 +382,14 @@
     return keyCode === 106 || keyCode === 109;
   }
 
+  function isCancelCandidateKeyEvent(e) {
+    if (!e.ctrlKey || e.altKey || e.metaKey) return false;
+    const code = e.keyCode;
+    if (code === 71) return true;
+    if (e.key.length !== 1) return false;
+    return (e.key.charCodeAt(0) | 32) === 103;
+  }
+
   function setTargetElement(el) {
     if (el) state.targetElement = el;
   }
@@ -471,6 +481,54 @@
     insertText(el, text);
   }
 
+  function canTrackRenderedRange(el) {
+    return !el.isContentEditable && el.selectionStart != null && el.selectionEnd != null;
+  }
+
+  function setRenderedRangeFromCaret(el, length) {
+    if (!canTrackRenderedRange(el)) return;
+    const end = el.selectionStart;
+    state.renderStart = Math.max(0, end - length);
+    state.renderEnd = end;
+  }
+
+  function clearRenderedRange() {
+    state.renderStart = null;
+    state.renderEnd = null;
+  }
+
+  function hasRenderedRange(el) {
+    return (
+      canTrackRenderedRange(el) &&
+      Number.isInteger(state.renderStart) &&
+      Number.isInteger(state.renderEnd) &&
+      state.renderStart >= 0 &&
+      state.renderEnd >= state.renderStart
+    );
+  }
+
+  function renderedOffset(el) {
+    if (!hasRenderedRange(el) || el.selectionStart !== el.selectionEnd) return null;
+    if (el.selectionStart < state.renderStart || el.selectionStart > state.renderEnd) return null;
+    return el.selectionStart - state.renderStart;
+  }
+
+  function replaceRendered(el, text, caretOffset = text.length) {
+    if (!hasRenderedRange(el)) {
+      replacePrevious(el, currentRenderedLength(), text);
+      setRenderedRangeFromCaret(el, text.length);
+      return;
+    }
+
+    const start = state.renderStart;
+    el.setRangeText(text, state.renderStart, state.renderEnd, "end");
+    dispatchInput(el);
+    state.renderStart = start;
+    state.renderEnd = start + text.length;
+    const nextCaret = start + Math.max(0, Math.min(caretOffset, text.length));
+    el.setSelectionRange(nextCaret, nextCaret);
+  }
+
   function toKatakana(text) {
     return text.replace(/[\u3041-\u3096]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60));
   }
@@ -500,10 +558,10 @@
     return engine.currentRenderedLength(state);
   }
 
-  function showPreedit(el) {
+  function showPreedit(el, caretOffset) {
     if (!state.composing) return;
     const text = composingPreedit();
-    replacePrevious(el, currentRenderedLength(), text);
+    replaceRendered(el, text, caretOffset ?? text.length);
     state.replacedLength = text.length;
     state.showingCandidate = false;
     state.mode = engine.STATE.SKK_HENKAN;
@@ -512,7 +570,7 @@
 
   function showCandidate(el) {
     const text = candidateText();
-    replacePrevious(el, currentRenderedLength(), text);
+    replaceRendered(el, text);
     state.replacedLength = text.length;
     state.showingCandidate = true;
     state.mode = engine.STATE.SKK_CANDIDATE;
@@ -522,7 +580,7 @@
   function showAbbrevPreedit(el) {
     if (!isAbbrevMode()) return;
     const text = abbrevPreedit();
-    replacePrevious(el, state.replacedLength, text);
+    replaceRendered(el, text);
     state.replacedLength = text.length;
     updateIndicator();
   }
@@ -535,6 +593,7 @@
     if (state.roman === "n") {
       insertText(el, "ん");
       appendComposingKana("ん");
+      setRenderedRangeFromCaret(el, state.replacedLength);
       state.roman = "";
     }
     state.okuriKey = key.toLowerCase();
@@ -574,6 +633,7 @@
     state.candidateIndex = 0;
     state.showingCandidate = false;
     state.replacedLength = 0;
+    clearRenderedRange();
     state.targetElement = null;
   }
 
@@ -590,6 +650,8 @@
       candidateIndex: state.candidateIndex,
       showingCandidate: state.showingCandidate,
       replacedLength: state.replacedLength,
+      renderStart: state.renderStart,
+      renderEnd: state.renderEnd,
       targetElement: state.targetElement
     };
   }
@@ -607,6 +669,8 @@
     state.candidateIndex = snapshot.candidateIndex;
     state.showingCandidate = snapshot.showingCandidate;
     state.replacedLength = snapshot.replacedLength;
+    state.renderStart = snapshot.renderStart ?? null;
+    state.renderEnd = snapshot.renderEnd ?? null;
     state.targetElement = snapshot.targetElement;
   }
 
@@ -758,7 +822,7 @@
     const committedKey = lookupKey();
     const selectedCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
     const text = state.showingCandidate ? candidateText() : preeditKana();
-    replacePrevious(el, currentRenderedLength(), text);
+    replaceRendered(el, text);
     if (selectedCandidate) {
       rememberCandidateSelection(committedKey, selectedCandidate);
     }
@@ -774,7 +838,7 @@
   function commitKatakana(el) {
     if (!state.composing || !preeditKana()) return false;
     const text = toKatakana(preeditKana());
-    replacePrevious(el, currentRenderedLength(), text);
+    replaceRendered(el, text);
     if (state.modalOpen && isRegisterInputElement(el)) {
       clearCompositionState();
       setTargetElement(el);
@@ -794,7 +858,7 @@
         state.roman = "";
       }
       if (state.composing) {
-        replacePrevious(el, currentRenderedLength(), preeditKana());
+        replaceRendered(el, preeditKana());
       }
     }
 
@@ -817,7 +881,7 @@
         state.roman = "";
       }
       if (state.composing) {
-        replacePrevious(el, currentRenderedLength(), preeditKana());
+        replaceRendered(el, preeditKana());
       }
     }
 
@@ -857,6 +921,7 @@
     insertText(el, text);
     if (state.composing) {
       appendComposingKana(text);
+      setRenderedRangeFromCaret(el, state.replacedLength);
     }
     return true;
   }
@@ -879,11 +944,12 @@
     setTargetElement(el);
     insertText(el, abbrevPreedit());
     state.replacedLength = abbrevPreedit().length;
+    setRenderedRangeFromCaret(el, state.replacedLength);
     updateIndicator();
   }
 
   function closeAbbrev(el, replacement) {
-    replacePrevious(el, state.replacedLength, replacement);
+    replaceRendered(el, replacement);
     clearCompositionState();
     setTargetElement(el);
     updateIndicator();
@@ -1018,6 +1084,15 @@
     return true;
   }
 
+  function cancelCandidateSelection(el) {
+    if (!state.composing || !state.showingCandidate) return false;
+    setTargetElement(el);
+    showPreedit(el);
+    state.candidates = [];
+    state.candidateIndex = 0;
+    return true;
+  }
+
   function startComposition(el) {
     state.mode = engine.STATE.SKK_HENKAN;
     state.composing = true;
@@ -1029,6 +1104,7 @@
     state.showingCandidate = false;
     insertText(el, engine.HENKAN_PREFIX);
     state.replacedLength = engine.HENKAN_PREFIX.length;
+    setRenderedRangeFromCaret(el, state.replacedLength);
     setTargetElement(el);
     updateIndicator();
   }
@@ -1037,6 +1113,7 @@
     const kana = engine.consumeRomanChunk(state);
     if (!kana) return false;
     insertText(el, kana);
+    setRenderedRangeFromCaret(el, state.replacedLength);
     return true;
   }
 
@@ -1049,6 +1126,7 @@
       if (state.roman === "n") {
         insertText(el, "ん");
         appendComposingKana("ん");
+        setRenderedRangeFromCaret(el, state.replacedLength);
         state.roman = "";
         return true;
       }
@@ -1101,6 +1179,30 @@
       return true;
     }
 
+    if (state.composing && !state.showingCandidate) {
+      const offset = renderedOffset(el);
+      if (offset != null && engine.deleteComposingCharBeforeOffset(state, offset)) {
+        if (!preeditKana()) {
+          replaceRendered(el, "", 0);
+          if (state.modalOpen && isRegisterInputElement(el)) {
+            if (el.value) {
+              clearCompositionState();
+              setTargetElement(el);
+              updateIndicator();
+            } else {
+              closeRegisterModal(true);
+            }
+            return true;
+          }
+          reset();
+          return true;
+        }
+
+        showPreedit(el, engine.composingOffsetAfterBackspace(offset));
+        return true;
+      }
+    }
+
     if (state.showingCandidate) {
       showPreedit(el);
     }
@@ -1114,7 +1216,7 @@
     }
 
     if (!preeditKana()) {
-      deleteBackward(el, currentRenderedLength());
+      replaceRendered(el, "", 0);
       if (state.modalOpen && isRegisterInputElement(el)) {
         if (el.value) {
           clearCompositionState();
@@ -1167,6 +1269,15 @@
     const el = getDeepActiveElement(document);
     const isEdit = isEditable(el);
     if (!isEdit) return;
+
+    if (isCancelCandidateKeyEvent(e)) {
+      if (cancelCandidateSelection(el)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      return;
+    }
+
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
     if (e.key === "Escape") {
@@ -1187,7 +1298,7 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         if (state.composing) {
-          replacePrevious(el, currentRenderedLength(), preeditKana());
+          replaceRendered(el, preeditKana());
         }
         clearCompositionState();
         updateIndicator();
@@ -1197,7 +1308,7 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         if (state.composing) {
-          replacePrevious(el, currentRenderedLength(), preeditKana());
+          replaceRendered(el, preeditKana());
         }
         reset();
       }
