@@ -9,6 +9,7 @@
 
   // SKK Lite:
   // - Ctrl+J: toggle enabled/disabled in the current focused input.
+  // - /: enter Abbrev mode from an empty kana buffer.
   // - l: return to ASCII mode.
   // - L: enter full-width ASCII mode.
   // - Hiragana mode: roman input -> kana.
@@ -30,8 +31,10 @@
 
   const state = {
     enabled: false,
+    mode: engine.STATE.SKK_KANA,
     wideAscii: false,
     roman: "",
+    abbrev: "",
     composing: false,
     kana: "",
     okuriKey: "",
@@ -112,6 +115,9 @@
       }
       .badge[data-mode="wide-ascii"] {
         background: rgba(96, 85, 155, 0.92);
+      }
+      .badge[data-mode="abbrev"] {
+        background: rgba(117, 82, 31, 0.94);
       }
       .badge[data-mode="compose"] {
         background: rgba(173, 93, 20, 0.94);
@@ -289,6 +295,7 @@
   function getIndicatorMode() {
     if (!state.enabled) return { mode: "off", text: "SKK OFF" };
     if (state.wideAscii) return { mode: "wide-ascii", text: "SKK 全英" };
+    if (isAbbrevMode()) return { mode: "abbrev", text: "SKK 略語" };
     if (state.composing && state.showingCandidate) return { mode: "candidate", text: "SKK 候補" };
     if (state.composing) return { mode: "compose", text: "SKK 変換" };
     return { mode: "kana", text: "SKK かな" };
@@ -340,6 +347,10 @@
       if (ch === " ") return "　";
       return String.fromCharCode(ch.charCodeAt(0) + 0xfee0);
     });
+  }
+
+  function isAbbrevMode() {
+    return state.mode === engine.STATE.ABBREV;
   }
 
   function isUpperAsciiLetter(ch) {
@@ -460,6 +471,14 @@
     return state.okuriKey ? state.kana + state.okuriKey : state.kana;
   }
 
+  function abbrevPreedit() {
+    return engine.abbrevPreedit(state);
+  }
+
+  function composingPreedit() {
+    return engine.composingPreedit(state);
+  }
+
   function candidateText() {
     const stem = state.candidates[state.candidateIndex] || state.kana;
     return state.okuriKey ? stem + state.okuriKana : stem;
@@ -471,10 +490,11 @@
 
   function showPreedit(el) {
     if (!state.composing) return;
-    const text = preeditKana();
+    const text = composingPreedit();
     replacePrevious(el, currentRenderedLength(), text);
     state.replacedLength = text.length;
     state.showingCandidate = false;
+    state.mode = engine.STATE.SKK_HENKAN;
     updateIndicator();
   }
 
@@ -483,6 +503,15 @@
     replacePrevious(el, currentRenderedLength(), text);
     state.replacedLength = text.length;
     state.showingCandidate = true;
+    state.mode = engine.STATE.SKK_CANDIDATE;
+    updateIndicator();
+  }
+
+  function showAbbrevPreedit(el) {
+    if (!isAbbrevMode()) return;
+    const text = abbrevPreedit();
+    replacePrevious(el, state.replacedLength, text);
+    state.replacedLength = text.length;
     updateIndicator();
   }
 
@@ -501,7 +530,7 @@
     state.candidates = [];
     state.candidateIndex = 0;
     state.showingCandidate = false;
-    state.replacedLength = 0;
+    state.replacedLength = composingPreedit().length;
     setTargetElement(el);
     updateIndicator();
   }
@@ -522,7 +551,9 @@
   }
 
   function clearCompositionState() {
+    state.mode = engine.STATE.SKK_KANA;
     state.roman = "";
+    state.abbrev = "";
     state.composing = false;
     state.kana = "";
     state.okuriKey = "";
@@ -536,7 +567,9 @@
 
   function captureCompositionState() {
     return {
+      mode: state.mode,
       roman: state.roman,
+      abbrev: state.abbrev,
       composing: state.composing,
       kana: state.kana,
       okuriKey: state.okuriKey,
@@ -551,7 +584,9 @@
 
   function restoreCompositionState(snapshot) {
     if (!snapshot) return;
+    state.mode = snapshot.mode || engine.STATE.SKK_KANA;
     state.roman = snapshot.roman;
+    state.abbrev = snapshot.abbrev || "";
     state.composing = snapshot.composing;
     state.kana = snapshot.kana;
     state.okuriKey = snapshot.okuriKey;
@@ -577,6 +612,7 @@
     const reading = lookupKey() || preeditKana();
     state.modalContext = captureCompositionState();
     clearCompositionState();
+    state.mode = engine.STATE.SKK_TOUROKU;
     registerModalEls.reading.textContent = reading;
     registerModalEls.input.value = "";
     registerModalEls.error.textContent = "";
@@ -723,14 +759,13 @@
   function enterAsciiMode(el) {
     if (state.showingCandidate) {
       commitCandidate(el);
-    } else if (state.roman) {
-      const pendingRoman = state.roman;
+    } else if (state.composing || state.roman) {
       if (!flushPendingRoman(el) && state.roman) {
         insertText(el, state.roman);
         state.roman = "";
       }
-      if (pendingRoman !== state.roman) {
-        state.replacedLength = preeditKana().length;
+      if (state.composing) {
+        replacePrevious(el, currentRenderedLength(), preeditKana());
       }
     }
 
@@ -747,10 +782,13 @@
   function enterWideAsciiMode(el) {
     if (state.showingCandidate) {
       commitCandidate(el);
-    } else if (state.roman) {
+    } else if (state.composing || state.roman) {
       if (!flushPendingRoman(el) && state.roman) {
         insertText(el, state.roman);
         state.roman = "";
+      }
+      if (state.composing) {
+        replacePrevious(el, currentRenderedLength(), preeditKana());
       }
     }
 
@@ -794,6 +832,100 @@
     return true;
   }
 
+  function canStartAbbrev() {
+    return (
+      state.enabled &&
+      !state.modalOpen &&
+      !state.wideAscii &&
+      !state.composing &&
+      !state.roman &&
+      !isAbbrevMode()
+    );
+  }
+
+  function startAbbrev(el) {
+    clearCompositionState();
+    state.mode = engine.STATE.ABBREV;
+    state.abbrev = "";
+    setTargetElement(el);
+    insertText(el, abbrevPreedit());
+    state.replacedLength = abbrevPreedit().length;
+    updateIndicator();
+  }
+
+  function closeAbbrev(el, replacement) {
+    replacePrevious(el, state.replacedLength, replacement);
+    clearCompositionState();
+    setTargetElement(el);
+    updateIndicator();
+  }
+
+  function handleAbbrevBackspace(el, e) {
+    if (!isAbbrevMode()) return false;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setTargetElement(el);
+
+    if (state.abbrev) {
+      state.abbrev = state.abbrev.slice(0, -1);
+      showAbbrevPreedit(el);
+      return true;
+    }
+
+    closeAbbrev(el, "");
+    return true;
+  }
+
+  function handleAbbrevPrintable(el, e) {
+    if (!isAbbrevMode()) return false;
+
+    if (e.key === "/") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      closeAbbrev(el, "/");
+      return true;
+    }
+
+    if (!engine.isAbbrevChar(e.key)) return false;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setTargetElement(el);
+    state.abbrev += e.key;
+    showAbbrevPreedit(el);
+    return true;
+  }
+
+  async function showAbbrevCandidates(el) {
+    if (!isAbbrevMode() || !state.abbrev) return;
+    setTargetElement(el);
+
+    const key = state.abbrev;
+    const renderedLength = state.replacedLength;
+    state.candidates = await lookup(key);
+    state.candidateIndex = 0;
+    state.kana = key;
+    state.okuriKey = "";
+    state.okuriKana = "";
+    state.roman = "";
+    state.abbrev = "";
+    state.composing = true;
+    state.replacedLength = renderedLength;
+
+    if (!state.candidates.length) {
+      state.mode = engine.STATE.SKK_TOUROKU;
+      state.showingCandidate = false;
+      openRegisterModal();
+      return;
+    }
+
+    state.mode = engine.STATE.SKK_CANDIDATE;
+    state.showingCandidate = false;
+    showCandidate(el);
+  }
+
   async function autoConvertOkuri(el) {
     if (!state.composing || !state.okuriKey || !state.okuriKana || state.roman || state.candidates.length) {
       return;
@@ -801,7 +933,7 @@
 
     state.candidates = await lookup(lookupKey());
     state.candidateIndex = 0;
-    state.replacedLength = preeditKana().length;
+    state.replacedLength = composingPreedit().length;
     if (state.candidates.length) {
       showCandidate(el);
     }
@@ -815,7 +947,7 @@
     if (!state.candidates.length) {
       state.candidates = await lookup(lookupKey());
       state.candidateIndex = 0;
-      state.replacedLength = preeditKana().length;
+      state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
         openRegisterModal();
         return;
@@ -854,6 +986,7 @@
   }
 
   function startComposition(el) {
+    state.mode = engine.STATE.SKK_HENKAN;
     state.composing = true;
     state.kana = "";
     state.okuriKey = "";
@@ -861,7 +994,8 @@
     state.candidates = [];
     state.candidateIndex = 0;
     state.showingCandidate = false;
-    state.replacedLength = 0;
+    insertText(el, engine.HENKAN_PREFIX);
+    state.replacedLength = engine.HENKAN_PREFIX.length;
     setTargetElement(el);
     updateIndicator();
   }
@@ -947,6 +1081,7 @@
     }
 
     if (!preeditKana()) {
+      deleteBackward(el, currentRenderedLength());
       reset();
       return true;
     }
@@ -992,6 +1127,12 @@
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
     if (e.key === "Escape") {
+      if (isAbbrevMode()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeAbbrev(el, "");
+        return;
+      }
       if (state.wideAscii) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1002,6 +1143,9 @@
       if (state.modalOpen && (state.composing || state.roman)) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        if (state.composing) {
+          replacePrevious(el, currentRenderedLength(), preeditKana());
+        }
         clearCompositionState();
         updateIndicator();
         return;
@@ -1009,6 +1153,9 @@
       if (state.composing || state.roman) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        if (state.composing) {
+          replacePrevious(el, currentRenderedLength(), preeditKana());
+        }
         reset();
       }
       return;
@@ -1016,12 +1163,37 @@
 
     if (e.key === "Backspace") {
       if (state.wideAscii) return;
+      if (handleAbbrevBackspace(el, e)) return;
       e.stopImmediatePropagation();
       handleBackspace(el, e);
       return;
     }
 
+    if (e.key === "/" && canStartAbbrev()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      startAbbrev(el);
+      return;
+    }
+
     if (handleZCommand(el, e)) {
+      return;
+    }
+
+    if (e.key === " " && isAbbrevMode()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void showAbbrevCandidates(el);
+      return;
+    }
+
+    if (handleAbbrevPrintable(el, e)) {
+      return;
+    }
+
+    if (isAbbrevMode()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
       return;
     }
 

@@ -43,8 +43,9 @@ runTest("Jixe composes to small-e", () => {
   typeRoman(state, "jixe");
 
   assert.equal(state.kana, "じぇ");
-  assert.equal(state.replacedLength, 2);
-  assert.equal(engine.currentRenderedLength(state), 2);
+  assert.equal(state.replacedLength, 3);
+  assert.equal(engine.currentRenderedLength(state), 3);
+  assert.equal(engine.composingPreedit(state), "▽じぇ");
 });
 
 runTest("backspace can replace the full previously rendered kana", () => {
@@ -54,7 +55,7 @@ runTest("backspace can replace the full previously rendered kana", () => {
   state.kana = state.kana.slice(0, -1);
 
   assert.equal(state.kana, "じ");
-  assert.equal(engine.currentRenderedLength(state), 2);
+  assert.equal(engine.currentRenderedLength(state), 3);
 });
 
 runTest("new composition starts cleanly after katakana commit", () => {
@@ -68,8 +69,8 @@ runTest("new composition starts cleanly after katakana commit", () => {
   typeRoman(second, "ji");
 
   assert.equal(second.kana, "じ");
-  assert.equal(second.replacedLength, 1);
-  assert.equal(engine.currentRenderedLength(second), 1);
+  assert.equal(second.replacedLength, 2);
+  assert.equal(engine.currentRenderedLength(second), 2);
 });
 
 runTest("uppercase does not start okuri before stem kana exists", () => {
@@ -79,4 +80,20 @@ runTest("uppercase does not start okuri before stem kana exists", () => {
   state.kana = "に";
 
   assert.equal(engine.shouldStartOkuri(state, "J"), true);
+});
+
+runTest("abbrev preedit renders slash-prefixed buffer", () => {
+  const state = { abbrev: "MCP-1" };
+
+  assert.equal(engine.STATE.ABBREV, "abbrev");
+  assert.equal(engine.abbrevPreedit(state), "▽/MCP-1");
+});
+
+runTest("abbrev accepts uppercase letters digits and hyphen without roman conversion", () => {
+  for (const ch of "MCP-1abc") {
+    assert.equal(engine.isAbbrevChar(ch), true);
+  }
+
+  assert.equal(engine.isAbbrevChar("/"), false);
+  assert.equal(engine.isAbbrevChar(" "), false);
 });

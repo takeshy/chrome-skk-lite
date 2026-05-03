@@ -7,6 +7,18 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, () => {
   "use strict";
 
+  const STATE = {
+    ASCII: "ascii",
+    SKK_KANA: "skk_kana",
+    SKK_HENKAN: "skk_henkan",
+    SKK_CANDIDATE: "skk_candidate",
+    ABBREV: "abbrev",
+    SKK_TOUROKU: "skk_touroku"
+  };
+
+  const HENKAN_PREFIX = "▽";
+  const ABBREV_PREFIX = "▽/";
+
   const KANA_TABLE = {
     "-": "ー", ",": "、", ".": "。", "[": "「", "]": "」",
     "a": "あ", "i": "い", "u": "う", "e": "え", "o": "お",
@@ -52,8 +64,17 @@
     return (state.kana || "") + (state.okuriKana || "");
   }
 
+  function abbrevPreedit(state) {
+    return ABBREV_PREFIX + (state.abbrev || "");
+  }
+
+  function composingPreedit(state) {
+    return HENKAN_PREFIX + preeditKana(state);
+  }
+
   function currentRenderedLength(state) {
     if (state.replacedLength) return state.replacedLength;
+    if (state.composing) return composingPreedit(state).length;
     return preeditKana(state).length;
   }
 
@@ -64,13 +85,24 @@
     } else {
       state.kana += kana;
     }
-    state.replacedLength = preeditKana(state).length;
+    state.replacedLength = composingPreedit(state).length;
   }
 
   function shouldStartOkuri(state, key) {
     if (key.length !== 1) return false;
     const code = key.charCodeAt(0);
     return code >= 65 && code <= 90 && !!state.composing && !state.okuriKey && !!state.kana;
+  }
+
+  function isAbbrevChar(key) {
+    if (key.length !== 1) return false;
+    const code = key.charCodeAt(0);
+    return (
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      key === "-"
+    );
   }
 
   function consumeRomanChunk(state) {
@@ -102,12 +134,18 @@
   }
 
   return {
+    STATE,
+    HENKAN_PREFIX,
+    ABBREV_PREFIX,
     KANA_TABLE,
     SMALL_TSU_RE,
     preeditKana,
+    abbrevPreedit,
+    composingPreedit,
     currentRenderedLength,
     appendComposingKana,
     shouldStartOkuri,
+    isAbbrevChar,
     consumeRomanChunk
   };
 });
