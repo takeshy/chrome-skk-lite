@@ -10,6 +10,7 @@
   // SKK Lite:
   // - Ctrl+J: toggle enabled/disabled in the current focused input.
   // - l: return to ASCII mode.
+  // - L: enter full-width ASCII mode.
   // - Hiragana mode: roman input -> kana.
   // - Shift+letter at beginning of a word: start conversion buffer.
   // - Space: convert current kana buffer using tiny dictionary.
@@ -29,6 +30,7 @@
 
   const state = {
     enabled: false,
+    wideAscii: false,
     roman: "",
     composing: false,
     kana: "",
@@ -46,6 +48,13 @@
   };
 
   const TOGGLE_DEDUPE_MS = 300;
+  const Z_COMMANDS = {
+    h: "←",
+    j: "↓",
+    k: "↑",
+    l: "→",
+    " ": "　"
+  };
 
   function syncUserDict(nextUserDict) {
     userDict = nextUserDict || {};
@@ -100,6 +109,9 @@
       }
       .badge[data-mode="kana"] {
         background: rgba(20, 111, 171, 0.92);
+      }
+      .badge[data-mode="wide-ascii"] {
+        background: rgba(96, 85, 155, 0.92);
       }
       .badge[data-mode="compose"] {
         background: rgba(173, 93, 20, 0.94);
@@ -276,6 +288,7 @@
 
   function getIndicatorMode() {
     if (!state.enabled) return { mode: "off", text: "SKK OFF" };
+    if (state.wideAscii) return { mode: "wide-ascii", text: "SKK 全英" };
     if (state.composing && state.showingCandidate) return { mode: "candidate", text: "SKK 候補" };
     if (state.composing) return { mode: "compose", text: "SKK 変換" };
     return { mode: "kana", text: "SKK かな" };
@@ -314,6 +327,19 @@
       code === 91 ||
       code === 93
     );
+  }
+
+  function isAsciiPrintableKey(key) {
+    if (key.length !== 1) return false;
+    const code = key.charCodeAt(0);
+    return code >= 32 && code <= 126;
+  }
+
+  function toFullWidthAscii(text) {
+    return text.replace(/[ -~]/g, (ch) => {
+      if (ch === " ") return "　";
+      return String.fromCharCode(ch.charCodeAt(0) + 0xfee0);
+    });
   }
 
   function isUpperAsciiLetter(ch) {
@@ -539,6 +565,7 @@
 
   function reset() {
     closeRegisterModal(false);
+    state.wideAscii = false;
     clearCompositionState();
     state.modalOpen = false;
     updateIndicator();
@@ -715,6 +742,56 @@
       return;
     }
     reset();
+  }
+
+  function enterWideAsciiMode(el) {
+    if (state.showingCandidate) {
+      commitCandidate(el);
+    } else if (state.roman) {
+      if (!flushPendingRoman(el) && state.roman) {
+        insertText(el, state.roman);
+        state.roman = "";
+      }
+    }
+
+    clearCompositionState();
+    state.enabled = true;
+    state.wideAscii = true;
+    setTargetElement(el);
+    updateIndicator();
+  }
+
+  function handleWideAsciiPrintable(el, e) {
+    if (!isAsciiPrintableKey(e.key)) return false;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setTargetElement(el);
+    insertText(el, toFullWidthAscii(e.key));
+    return true;
+  }
+
+  function handleZCommand(el, e) {
+    if (state.roman !== "z") return false;
+    const text = Z_COMMANDS[e.key];
+    if (!text) return false;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setTargetElement(el);
+
+    if (state.showingCandidate) {
+      showPreedit(el);
+      state.candidates = [];
+      state.candidateIndex = 0;
+    }
+
+    state.roman = "";
+    insertText(el, text);
+    if (state.composing) {
+      appendComposingKana(text);
+    }
+    return true;
   }
 
   async function autoConvertOkuri(el) {
@@ -915,6 +992,13 @@
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
     if (e.key === "Escape") {
+      if (state.wideAscii) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        state.wideAscii = false;
+        updateIndicator();
+        return;
+      }
       if (state.modalOpen && (state.composing || state.roman)) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -931,8 +1015,13 @@
     }
 
     if (e.key === "Backspace") {
+      if (state.wideAscii) return;
       e.stopImmediatePropagation();
       handleBackspace(el, e);
+      return;
+    }
+
+    if (handleZCommand(el, e)) {
       return;
     }
 
@@ -940,6 +1029,18 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       enterAsciiMode(el);
+      return;
+    }
+
+    if (e.key === "L" && !state.wideAscii) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      enterWideAsciiMode(el);
+      return;
+    }
+
+    if (state.wideAscii) {
+      handleWideAsciiPrintable(el, e);
       return;
     }
 
