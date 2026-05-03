@@ -9,6 +9,7 @@
 
   // SKK Lite:
   // - Ctrl+J: toggle enabled/disabled in the current focused input.
+  // - l: return to ASCII mode.
   // - Hiragana mode: roman input -> kana.
   // - Shift+letter at beginning of a word: start conversion buffer.
   // - Space: convert current kana buffer using tiny dictionary.
@@ -692,6 +693,30 @@
     return true;
   }
 
+  function enterAsciiMode(el) {
+    if (state.showingCandidate) {
+      commitCandidate(el);
+    } else if (state.roman) {
+      const pendingRoman = state.roman;
+      if (!flushPendingRoman(el) && state.roman) {
+        insertText(el, state.roman);
+        state.roman = "";
+      }
+      if (pendingRoman !== state.roman) {
+        state.replacedLength = preeditKana().length;
+      }
+    }
+
+    state.enabled = false;
+    if (state.modalOpen && isRegisterInputElement(el)) {
+      clearCompositionState();
+      setTargetElement(el);
+      updateIndicator();
+      return;
+    }
+    reset();
+  }
+
   async function autoConvertOkuri(el) {
     if (!state.composing || !state.okuriKey || !state.okuriKana || state.roman || state.candidates.length) {
       return;
@@ -908,6 +933,13 @@
     if (e.key === "Backspace") {
       e.stopImmediatePropagation();
       handleBackspace(el, e);
+      return;
+    }
+
+    if (e.key === "l") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      enterAsciiMode(el);
       return;
     }
 
