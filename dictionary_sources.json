@@ -14,6 +14,9 @@
     "content.js",
     "options.html",
     "options.js",
-    "skk_engine.js"
+    "skk_engine.js",
+    "icons/icon16.png",
+    "icons/icon48.png",
+    "icons/icon128.png"
   ]
 }
