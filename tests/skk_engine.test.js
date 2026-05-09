@@ -48,6 +48,65 @@ runTest("Jixe composes to small-e", () => {
   assert.equal(engine.composingPreedit(state), "▽じぇ");
 });
 
+runTest("we composes to u-small-e", () => {
+  const state = createState();
+
+  typeRoman(state, "we");
+
+  assert.equal(state.kana, "うぇ");
+  assert.equal(state.roman, "");
+  assert.equal(engine.composingPreedit(state), "▽うぇ");
+});
+
+runTest("xi composes to small i", () => {
+  const state = createState();
+
+  typeRoman(state, "xi");
+
+  assert.equal(state.kana, "ぃ");
+  assert.equal(state.roman, "");
+  assert.equal(engine.composingPreedit(state), "▽ぃ");
+});
+
+runTest("invalid pending roman drops the previous character", () => {
+  const state = createState();
+
+  typeRoman(state, "wk");
+
+  assert.equal(state.kana, "");
+  assert.equal(state.roman, "k");
+
+  typeRoman(state, "a");
+
+  assert.equal(state.kana, "か");
+  assert.equal(state.roman, "");
+});
+
+runTest("remaining roman can be consumed after an invalid prefix is dropped", () => {
+  const state = createState();
+
+  state.roman = "w[";
+
+  assert.equal(engine.consumeRomanChunk(state), "");
+  assert.equal(state.roman, "[");
+  assert.equal(engine.consumeRomanChunk(state), "「");
+  assert.equal(state.kana, "「");
+  assert.equal(state.roman, "");
+});
+
+runTest("single n can be committed before special keys", () => {
+  const state = createState();
+
+  typeRoman(state, "n");
+
+  assert.equal(state.kana, "");
+  assert.equal(state.roman, "n");
+  assert.equal(engine.consumePendingN(state), "ん");
+  assert.equal(state.kana, "ん");
+  assert.equal(state.roman, "");
+  assert.equal(engine.composingPreedit(state), "▽ん");
+});
+
 runTest("backspace can replace the full previously rendered kana", () => {
   const state = createState();
 
@@ -80,6 +139,16 @@ runTest("uppercase does not start okuri before stem kana exists", () => {
   state.kana = "に";
 
   assert.equal(engine.shouldStartOkuri(state, "J"), true);
+});
+
+runTest("okuri lookup key excludes okuri kana", () => {
+  const state = createState();
+  state.kana = "とうと";
+  state.okuriKey = "i";
+  state.okuriKana = "い";
+
+  assert.equal(engine.preeditKana(state), "とうとい");
+  assert.equal(engine.lookupKey(state), "とうとi");
 });
 
 runTest("abbrev preedit renders slash-prefixed buffer", () => {

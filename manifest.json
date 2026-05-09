@@ -21,7 +21,7 @@
         "linux": "Ctrl+J",
         "windows": "Ctrl+J"
       },
-      "description": "Toggle SKK Lite"
+      "description": "Enable SKK Lite hiragana mode"
     }
   },
   "content_scripts": [

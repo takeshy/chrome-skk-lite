@@ -8,7 +8,7 @@
   }
 
   // SKK Lite:
-  // - Ctrl+J: toggle enabled/disabled in the current focused input.
+  // - Ctrl+J: enter hiragana mode in the current focused input.
   // - /: enter Abbrev mode from an empty kana buffer.
   // - l: return to ASCII mode.
   // - L: enter full-width ASCII mode.
@@ -26,6 +26,9 @@
   let candidateHistory = {};
   const lookupCache = new Map();
   let indicatorBadge = null;
+  let indicatorMode = "";
+  let indicatorText = "";
+  let preeditPopup = null;
   let registerModal = null;
   let registerModalEls = null;
   const EDITABLE_INPUT_TYPES = new Set(["text", "search", "tel", "url", "email"]);
@@ -48,6 +51,8 @@
     replacedLength: 0,
     renderStart: null,
     renderEnd: null,
+    renderRange: null,
+    lastInsertionRange: null,
     targetElement: null,
     lastKeyToggleAt: 0,
     lastCommandToggleAt: 0
@@ -146,6 +151,81 @@
     shadow.append(style, indicatorBadge);
     parent.appendChild(host);
     return indicatorBadge;
+  }
+
+  function ensurePreeditPopup() {
+    if (preeditPopup) return preeditPopup;
+
+    const parent = document.documentElement || document.body;
+    if (!parent) return null;
+
+    const host = document.createElement("div");
+    host.style.cssText = [
+      "all: initial",
+      "position: fixed",
+      "left: 0",
+      "top: 0",
+      "z-index: 2147483647",
+      "pointer-events: none"
+    ].join(";");
+
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = `
+      .preedit {
+        box-sizing: border-box;
+        display: none;
+        max-width: min(520px, calc(100vw - 24px));
+        padding: 4px 7px;
+        border: 1px solid rgba(15, 23, 42, 0.18);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.96);
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.18);
+        color: #0f172a;
+        font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .preedit[data-mode="candidate"] {
+        border-color: rgba(22, 101, 52, 0.36);
+        background: rgba(240, 253, 244, 0.98);
+      }
+    `;
+
+    preeditPopup = document.createElement("div");
+    preeditPopup.className = "preedit";
+    preeditPopup.dataset.mode = "compose";
+    shadow.append(style, preeditPopup);
+    parent.appendChild(host);
+    return preeditPopup;
+  }
+
+  function positionPreeditPopup(el) {
+    const popup = ensurePreeditPopup();
+    if (!popup || !el?.getBoundingClientRect) return;
+
+    const rect = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 24));
+    const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 40));
+    popup.getRootNode().host.style.left = `${left}px`;
+    popup.getRootNode().host.style.top = `${top}px`;
+  }
+
+  function showPreeditPopup(el, text, mode = "compose") {
+    const popup = ensurePreeditPopup();
+    if (!popup) return;
+    popup.textContent = text;
+    popup.dataset.mode = mode;
+    popup.style.display = text ? "block" : "none";
+    if (text) positionPreeditPopup(el);
+  }
+
+  function hidePreeditPopup() {
+    if (preeditPopup) {
+      preeditPopup.style.display = "none";
+      preeditPopup.textContent = "";
+    }
   }
 
   function ensureRegisterModal() {
@@ -294,6 +374,15 @@
         closeRegisterModal(true);
         return;
       }
+      if (isToggleKeyEvent(e)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (state.composing) {
+          if (!flushPendingRoman(registerModalEls.input)) return;
+          commitCandidate(registerModalEls.input);
+        }
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         if (insertUnicodeFromRegisterInput()) {
@@ -320,6 +409,9 @@
     if (!badge) return;
 
     const { mode, text } = getIndicatorMode();
+    if (indicatorMode === mode && indicatorText === text) return;
+    indicatorMode = mode;
+    indicatorText = text;
     badge.dataset.mode = mode;
     badge.textContent = text;
   }
@@ -376,10 +468,10 @@
   function isToggleKeyEvent(e) {
     if (!e.ctrlKey) return false;
     const code = e.keyCode;
-    if (code === 74 || code === 77) return true;
+    if (code === 74) return true;
     if (e.key.length !== 1) return false;
     const keyCode = e.key.charCodeAt(0) | 32;
-    return keyCode === 106 || keyCode === 109;
+    return keyCode === 106;
   }
 
   function isCancelCandidateKeyEvent(e) {
@@ -404,17 +496,18 @@
     }
   }
 
-  function toggleEnabled(source) {
-    state.enabled = !state.enabled;
+  function enterKanaMode(source) {
+    const wasEnabled = state.enabled;
+    state.enabled = true;
     reset();
-    if (state.enabled) {
+    if (!wasEnabled) {
       chrome.runtime.sendMessage({ type: "warmup" }).catch(() => {});
     }
-    console.log(`[SKK-LITE-V2] Toggled via ${source}. New state: ${state.enabled}`);
+    console.log(`[SKK-LITE-V2] Entered kana mode via ${source}.`);
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type !== "toggle") return;
+    if (message.type !== "activate" && message.type !== "toggle") return;
 
     if (state.modalOpen) {
       return;
@@ -427,12 +520,12 @@
 
     const now = Date.now();
     if (now - state.lastKeyToggleAt < TOGGLE_DEDUPE_MS) {
-      console.debug("[SKK-LITE-V2] Ignored duplicate toggle from command.");
+      console.debug("[SKK-LITE-V2] Ignored duplicate activation from command.");
       return;
     }
 
     state.lastCommandToggleAt = now;
-    toggleEnabled(message.source || "message");
+    enterKanaMode(message.source || "message");
   });
 
   function isEditable(el) {
@@ -449,9 +542,27 @@
     el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
   }
 
-  function insertText(el, text) {
+  function insertText(el, text, options = {}) {
+    const trackRange = !!options.trackRange;
     if (el.isContentEditable) {
+      const sel = trackRange ? document.getSelection() : null;
+      const before = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
       document.execCommand("insertText", false, text);
+      if (trackRange) {
+        const after = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+        if (before && after && el.contains(after.endContainer)) {
+          const inserted = document.createRange();
+          try {
+            inserted.setStart(before.startContainer, before.startOffset);
+            inserted.setEnd(after.endContainer, after.endOffset);
+            state.lastInsertionRange = el.contains(inserted.startContainer) ? inserted : null;
+          } catch {
+            state.lastInsertionRange = null;
+          }
+        } else {
+          state.lastInsertionRange = null;
+        }
+      }
       return;
     }
     const start = el.selectionStart;
@@ -481,12 +592,64 @@
     insertText(el, text);
   }
 
+  function contentEditableSelectionRange(el) {
+    const sel = document.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return null;
+    return range;
+  }
+
+  function selectContentEditableRange(el, range) {
+    if (!range || !el.contains(range.startContainer) || !el.contains(range.endContainer)) return false;
+    const sel = document.getSelection();
+    if (!sel) return false;
+    sel.removeAllRanges();
+    sel.addRange(range.cloneRange());
+    return true;
+  }
+
+  function contentEditablePointInRangeAtTextOffset(el, range, offset) {
+    const root = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentNode;
+    const walker = document.createTreeWalker(root || el, NodeFilter.SHOW_TEXT);
+    let remaining = Math.max(0, offset);
+    let fallback = { node: range.endContainer, offset: range.endOffset };
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!el.contains(node) || !range.intersectsNode(node)) continue;
+
+      let start = 0;
+      let end = node.nodeValue.length;
+      if (node === range.startContainer) start = range.startOffset;
+      if (node === range.endContainer) end = range.endOffset;
+      if (end < start) continue;
+
+      const length = end - start;
+      fallback = { node, offset: end };
+      if (remaining <= length) {
+        return { node, offset: start + remaining };
+      }
+      remaining -= length;
+    }
+
+    return fallback;
+  }
+
   function canTrackRenderedRange(el) {
-    return !el.isContentEditable && el.selectionStart != null && el.selectionEnd != null;
+    return el.isContentEditable || (el.selectionStart != null && el.selectionEnd != null);
   }
 
   function setRenderedRangeFromCaret(el, length) {
     if (!canTrackRenderedRange(el)) return;
+    if (el.isContentEditable) {
+      if (state.lastInsertionRange) {
+        state.renderRange = state.lastInsertionRange.cloneRange();
+      }
+      return;
+    }
     const end = el.selectionStart;
     state.renderStart = Math.max(0, end - length);
     state.renderEnd = end;
@@ -495,9 +658,18 @@
   function clearRenderedRange() {
     state.renderStart = null;
     state.renderEnd = null;
+    state.renderRange = null;
+    state.lastInsertionRange = null;
   }
 
   function hasRenderedRange(el) {
+    if (el.isContentEditable) {
+      return (
+        !!state.renderRange &&
+        el.contains(state.renderRange.startContainer) &&
+        el.contains(state.renderRange.endContainer)
+      );
+    }
     return (
       canTrackRenderedRange(el) &&
       Number.isInteger(state.renderStart) &&
@@ -508,9 +680,48 @@
   }
 
   function renderedOffset(el) {
-    if (!hasRenderedRange(el) || el.selectionStart !== el.selectionEnd) return null;
+    if (!hasRenderedRange(el)) return null;
+    if (el.isContentEditable) {
+      const caret = contentEditableSelectionRange(el);
+      if (!caret || !caret.collapsed) return null;
+      if (!state.renderRange.isPointInRange(caret.startContainer, caret.startOffset)) return null;
+      const beforeCaret = state.renderRange.cloneRange();
+      beforeCaret.setEnd(caret.startContainer, caret.startOffset);
+      return beforeCaret.toString().length;
+    }
+    if (el.selectionStart !== el.selectionEnd) return null;
     if (el.selectionStart < state.renderStart || el.selectionStart > state.renderEnd) return null;
     return el.selectionStart - state.renderStart;
+  }
+
+  function captureTargetSelection(el) {
+    if (!el) return null;
+    if (el.isContentEditable) {
+      const range = contentEditableSelectionRange(el);
+      return range ? { type: "contenteditable", range: range.cloneRange() } : null;
+    }
+    if (el.selectionStart == null || el.selectionEnd == null) return null;
+    return {
+      type: "input",
+      start: el.selectionStart,
+      end: el.selectionEnd
+    };
+  }
+
+  function restoreTargetSelection(el, snapshot) {
+    if (!el || !snapshot) return false;
+    if (snapshot.type === "contenteditable") {
+      el.focus();
+      return selectContentEditableRange(el, snapshot.range);
+    }
+    if (snapshot.type === "input" && el.selectionStart != null && el.selectionEnd != null) {
+      const end = typeof el.value === "string" ? el.value.length : snapshot.end;
+      const start = Math.max(0, Math.min(snapshot.start, end));
+      const nextEnd = Math.max(start, Math.min(snapshot.end, end));
+      el.setSelectionRange(start, nextEnd);
+      return true;
+    }
+    return false;
   }
 
   function replaceRendered(el, text, caretOffset = text.length) {
@@ -521,6 +732,29 @@
     }
 
     const start = state.renderStart;
+    if (el.isContentEditable) {
+      el.focus();
+      if (!selectContentEditableRange(el, state.renderRange)) {
+        replacePrevious(el, currentRenderedLength(), text);
+        setRenderedRangeFromCaret(el, text.length);
+        return;
+      }
+      insertText(el, text, { trackRange: true });
+      if (state.lastInsertionRange) {
+        state.renderRange = state.lastInsertionRange.cloneRange();
+        const caretPoint = contentEditablePointInRangeAtTextOffset(
+          el,
+          state.renderRange,
+          Math.max(0, Math.min(caretOffset, text.length))
+        );
+        const caretRange = document.createRange();
+        caretRange.setStart(caretPoint.node, caretPoint.offset);
+        caretRange.collapse(true);
+        selectContentEditableRange(el, caretRange);
+      }
+      return;
+    }
+
     el.setRangeText(text, state.renderStart, state.renderEnd, "end");
     dispatchInput(el);
     state.renderStart = start;
@@ -538,7 +772,15 @@
   }
 
   function lookupKey() {
+    if (typeof engine.lookupKey === "function") {
+      return engine.lookupKey(state);
+    }
     return state.okuriKey ? state.kana + state.okuriKey : state.kana;
+  }
+
+  function lookupKeys() {
+    const primary = lookupKey();
+    return [primary];
   }
 
   function abbrevPreedit() {
@@ -558,9 +800,38 @@
     return engine.currentRenderedLength(state);
   }
 
+  function shouldRenderPreeditInTarget(el) {
+    return state.modalOpen && isRegisterInputElement(el);
+  }
+
+  function currentPreeditDisplayText() {
+    if (isAbbrevMode()) return abbrevPreedit();
+    if (!state.composing) return "";
+    return state.showingCandidate ? candidateText() : composingPreedit();
+  }
+
+  function commitRawPreeditText(el) {
+    if (!state.composing) return;
+    const text = preeditKana();
+    if (shouldRenderPreeditInTarget(el)) {
+      replaceRendered(el, text);
+    } else {
+      hidePreeditPopup();
+      if (text) insertText(el, text);
+    }
+  }
+
   function showPreedit(el, caretOffset) {
     if (!state.composing) return;
     const text = composingPreedit();
+    if (!shouldRenderPreeditInTarget(el)) {
+      showPreeditPopup(el, text, "compose");
+      state.replacedLength = text.length;
+      state.showingCandidate = false;
+      state.mode = engine.STATE.SKK_HENKAN;
+      updateIndicator();
+      return;
+    }
     replaceRendered(el, text, caretOffset ?? text.length);
     state.replacedLength = text.length;
     state.showingCandidate = false;
@@ -570,6 +841,14 @@
 
   function showCandidate(el) {
     const text = candidateText();
+    if (!shouldRenderPreeditInTarget(el)) {
+      showPreeditPopup(el, text, "candidate");
+      state.replacedLength = text.length;
+      state.showingCandidate = true;
+      state.mode = engine.STATE.SKK_CANDIDATE;
+      updateIndicator();
+      return;
+    }
     replaceRendered(el, text);
     state.replacedLength = text.length;
     state.showingCandidate = true;
@@ -580,6 +859,12 @@
   function showAbbrevPreedit(el) {
     if (!isAbbrevMode()) return;
     const text = abbrevPreedit();
+    if (!shouldRenderPreeditInTarget(el)) {
+      showPreeditPopup(el, text, "compose");
+      state.replacedLength = text.length;
+      updateIndicator();
+      return;
+    }
     replaceRendered(el, text);
     state.replacedLength = text.length;
     updateIndicator();
@@ -591,9 +876,13 @@
 
   function startOkuri(el, key) {
     if (state.roman === "n") {
-      insertText(el, "ん");
+      if (shouldRenderPreeditInTarget(el)) {
+        insertText(el, "ん", { trackRange: true });
+      }
       appendComposingKana("ん");
-      setRenderedRangeFromCaret(el, state.replacedLength);
+      if (shouldRenderPreeditInTarget(el)) {
+        setRenderedRangeFromCaret(el, state.replacedLength);
+      }
       state.roman = "";
     }
     state.okuriKey = key.toLowerCase();
@@ -603,6 +892,9 @@
     state.showingCandidate = false;
     state.replacedLength = composingPreedit().length;
     setTargetElement(el);
+    if (!shouldRenderPreeditInTarget(el)) {
+      showPreeditPopup(el, composingPreedit(), "compose");
+    }
     updateIndicator();
   }
 
@@ -617,6 +909,10 @@
     if (modalContext) {
       restoreCompositionState(modalContext);
       focusTargetElement();
+      const el = state.targetElement;
+      if (el && !shouldRenderPreeditInTarget(el)) {
+        showPreeditPopup(el, currentPreeditDisplayText(), state.showingCandidate ? "candidate" : "compose");
+      }
       updateIndicator();
     }
   }
@@ -634,6 +930,7 @@
     state.showingCandidate = false;
     state.replacedLength = 0;
     clearRenderedRange();
+    hidePreeditPopup();
     state.targetElement = null;
   }
 
@@ -652,6 +949,8 @@
       replacedLength: state.replacedLength,
       renderStart: state.renderStart,
       renderEnd: state.renderEnd,
+      renderRange: state.renderRange ? state.renderRange.cloneRange() : null,
+      targetSelection: captureTargetSelection(state.targetElement),
       targetElement: state.targetElement
     };
   }
@@ -671,6 +970,7 @@
     state.replacedLength = snapshot.replacedLength;
     state.renderStart = snapshot.renderStart ?? null;
     state.renderEnd = snapshot.renderEnd ?? null;
+    state.renderRange = snapshot.renderRange ? snapshot.renderRange.cloneRange() : null;
     state.targetElement = snapshot.targetElement;
   }
 
@@ -687,6 +987,7 @@
     if (!modal) return;
     const reading = lookupKey() || preeditKana();
     state.modalContext = captureCompositionState();
+    hidePreeditPopup();
     clearCompositionState();
     state.mode = engine.STATE.SKK_TOUROKU;
     registerModalEls.reading.textContent = reading;
@@ -778,12 +1079,13 @@
     closeRegisterModal(false);
 
     if (target) {
-      commitCandidate(target);
       try {
         target.focus({ preventScroll: true });
       } catch {
         target.focus();
       }
+      restoreTargetSelection(target, modalContext?.targetSelection);
+      commitCandidate(target);
     }
   }
 
@@ -806,6 +1108,17 @@
     return lookupPromise;
   }
 
+  async function lookupAny(keys) {
+    const merged = [];
+    for (const key of keys) {
+      const candidates = await lookup(key);
+      for (const candidate of candidates) {
+        if (!merged.includes(candidate)) merged.push(candidate);
+      }
+    }
+    return merged;
+  }
+
   function rememberCandidateSelection(key, candidate) {
     if (!key || !candidate) return;
 
@@ -822,7 +1135,12 @@
     const committedKey = lookupKey();
     const selectedCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
     const text = state.showingCandidate ? candidateText() : preeditKana();
-    replaceRendered(el, text);
+    if (shouldRenderPreeditInTarget(el)) {
+      replaceRendered(el, text);
+    } else {
+      hidePreeditPopup();
+      insertText(el, text);
+    }
     if (selectedCandidate) {
       rememberCandidateSelection(committedKey, selectedCandidate);
     }
@@ -838,7 +1156,12 @@
   function commitKatakana(el) {
     if (!state.composing || !preeditKana()) return false;
     const text = toKatakana(preeditKana());
-    replaceRendered(el, text);
+    if (shouldRenderPreeditInTarget(el)) {
+      replaceRendered(el, text);
+    } else {
+      hidePreeditPopup();
+      insertText(el, text);
+    }
     if (state.modalOpen && isRegisterInputElement(el)) {
       clearCompositionState();
       setTargetElement(el);
@@ -858,7 +1181,7 @@
         state.roman = "";
       }
       if (state.composing) {
-        replaceRendered(el, preeditKana());
+        commitRawPreeditText(el);
       }
     }
 
@@ -881,7 +1204,7 @@
         state.roman = "";
       }
       if (state.composing) {
-        replaceRendered(el, preeditKana());
+        commitRawPreeditText(el);
       }
     }
 
@@ -918,10 +1241,16 @@
     }
 
     state.roman = "";
-    insertText(el, text);
     if (state.composing) {
       appendComposingKana(text);
-      setRenderedRangeFromCaret(el, state.replacedLength);
+      if (shouldRenderPreeditInTarget(el)) {
+        insertText(el, text, { trackRange: true });
+        setRenderedRangeFromCaret(el, state.replacedLength);
+      } else {
+        showPreedit(el);
+      }
+    } else {
+      insertText(el, text);
     }
     return true;
   }
@@ -942,14 +1271,23 @@
     state.mode = engine.STATE.ABBREV;
     state.abbrev = "";
     setTargetElement(el);
-    insertText(el, abbrevPreedit());
     state.replacedLength = abbrevPreedit().length;
-    setRenderedRangeFromCaret(el, state.replacedLength);
+    if (shouldRenderPreeditInTarget(el)) {
+      insertText(el, abbrevPreedit(), { trackRange: true });
+      setRenderedRangeFromCaret(el, state.replacedLength);
+    } else {
+      showPreeditPopup(el, abbrevPreedit(), "compose");
+    }
     updateIndicator();
   }
 
   function closeAbbrev(el, replacement) {
-    replaceRendered(el, replacement);
+    if (shouldRenderPreeditInTarget(el)) {
+      replaceRendered(el, replacement);
+    } else {
+      hidePreeditPopup();
+      if (replacement) insertText(el, replacement);
+    }
     clearCompositionState();
     setTargetElement(el);
     updateIndicator();
@@ -1026,7 +1364,7 @@
       return;
     }
 
-    state.candidates = await lookup(lookupKey());
+    state.candidates = await lookupAny(lookupKeys());
     state.candidateIndex = 0;
     state.replacedLength = composingPreedit().length;
     if (state.candidates.length) {
@@ -1040,7 +1378,7 @@
     if (!flushPendingRoman(el)) return;
 
     if (!state.candidates.length) {
-      state.candidates = await lookup(lookupKey());
+      state.candidates = await lookupAny(lookupKeys());
       state.candidateIndex = 0;
       state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
@@ -1085,7 +1423,7 @@
   }
 
   function cancelCandidateSelection(el) {
-    if (!state.composing || !state.showingCandidate) return false;
+    if (!state.composing) return false;
     setTargetElement(el);
     showPreedit(el);
     state.candidates = [];
@@ -1102,9 +1440,13 @@
     state.candidates = [];
     state.candidateIndex = 0;
     state.showingCandidate = false;
-    insertText(el, engine.HENKAN_PREFIX);
     state.replacedLength = engine.HENKAN_PREFIX.length;
-    setRenderedRangeFromCaret(el, state.replacedLength);
+    if (shouldRenderPreeditInTarget(el)) {
+      insertText(el, engine.HENKAN_PREFIX, { trackRange: true });
+      setRenderedRangeFromCaret(el, state.replacedLength);
+    } else {
+      showPreeditPopup(el, composingPreedit(), "compose");
+    }
     setTargetElement(el);
     updateIndicator();
   }
@@ -1112,8 +1454,18 @@
   function convertRomanChunk(el) {
     const kana = engine.consumeRomanChunk(state);
     if (!kana) return false;
-    insertText(el, kana);
-    setRenderedRangeFromCaret(el, state.replacedLength);
+    if (state.composing && !shouldRenderPreeditInTarget(el)) {
+      showPreedit(el);
+    } else {
+      const trackRange = state.composing || isAbbrevMode();
+      insertText(el, kana, { trackRange });
+      if (state.composing || isAbbrevMode()) {
+        setRenderedRangeFromCaret(el, state.replacedLength);
+      }
+    }
+    if (state.composing && state.okuriKey && state.okuriKana && !state.roman && !state.candidates.length) {
+      void autoConvertOkuri(el);
+    }
     return true;
   }
 
@@ -1122,12 +1474,20 @@
 
     let guard = 0;
     while (state.roman && guard++ < 8) {
+      const beforeRoman = state.roman;
       if (convertRomanChunk(el)) continue;
+      if (state.roman !== beforeRoman) continue;
       if (state.roman === "n") {
-        insertText(el, "ん");
-        appendComposingKana("ん");
-        setRenderedRangeFromCaret(el, state.replacedLength);
-        state.roman = "";
+        const kana = engine.consumePendingN(state);
+        if (state.composing && !shouldRenderPreeditInTarget(el)) {
+          showPreedit(el);
+        } else {
+          const trackRange = state.composing || isAbbrevMode();
+          insertText(el, kana, { trackRange });
+          if (state.composing || isAbbrevMode()) {
+            setRenderedRangeFromCaret(el, state.replacedLength);
+          }
+        }
         return true;
       }
       break;
@@ -1160,10 +1520,10 @@
     state.roman += ch.toLowerCase();
     let guard = 0;
     while (state.roman && guard++ < 4) {
-      if (!convertRomanChunk(el)) break;
-    }
-    if (state.composing && state.okuriKey && state.okuriKana && !state.roman && !state.candidates.length) {
-      void autoConvertOkuri(el);
+      const beforeRoman = state.roman;
+      if (convertRomanChunk(el)) continue;
+      if (state.roman !== beforeRoman) continue;
+      break;
     }
     return true;
   }
@@ -1183,7 +1543,11 @@
       const offset = renderedOffset(el);
       if (offset != null && engine.deleteComposingCharBeforeOffset(state, offset)) {
         if (!preeditKana()) {
-          replaceRendered(el, "", 0);
+          if (shouldRenderPreeditInTarget(el)) {
+            replaceRendered(el, "", 0);
+          } else {
+            hidePreeditPopup();
+          }
           if (state.modalOpen && isRegisterInputElement(el)) {
             if (el.value) {
               clearCompositionState();
@@ -1216,7 +1580,11 @@
     }
 
     if (!preeditKana()) {
-      replaceRendered(el, "", 0);
+      if (shouldRenderPreeditInTarget(el)) {
+        replaceRendered(el, "", 0);
+      } else {
+        hidePreeditPopup();
+      }
       if (state.modalOpen && isRegisterInputElement(el)) {
         if (el.value) {
           clearCompositionState();
@@ -1239,15 +1607,18 @@
     if (isToggleKeyEvent(e)) {
       const el = getDeepActiveElement(document);
       const isRegisterInput = isRegisterInputElement(el);
+      if (state.modalOpen && isRegisterInput) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (state.composing) {
+          commitCandidate(el);
+        }
+        return;
+      }
       if (state.enabled && state.composing && !isRegisterInput) {
         e.preventDefault();
         e.stopImmediatePropagation();
         commitCandidate(el);
-        return;
-      }
-      if (state.modalOpen && isRegisterInput) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
         return;
       }
       e.preventDefault();
@@ -1255,12 +1626,12 @@
 
       const now = Date.now();
       if (now - state.lastCommandToggleAt < TOGGLE_DEDUPE_MS) {
-        console.debug("[SKK-LITE-V2] Ignored duplicate toggle from keydown.");
+        console.debug("[SKK-LITE-V2] Ignored duplicate activation from keydown.");
         return;
       }
 
       state.lastKeyToggleAt = now;
-      toggleEnabled("key");
+      enterKanaMode("key");
       return;
     }
 
@@ -1298,7 +1669,7 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         if (state.composing) {
-          replaceRendered(el, preeditKana());
+          commitRawPreeditText(el);
         }
         clearCompositionState();
         updateIndicator();
@@ -1308,7 +1679,7 @@
         e.preventDefault();
         e.stopImmediatePropagation();
         if (state.composing) {
-          replaceRendered(el, preeditKana());
+          commitRawPreeditText(el);
         }
         reset();
       }
@@ -1373,6 +1744,7 @@
     if (e.key.toLowerCase() === "q" && state.composing) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (!flushPendingRoman(el)) return;
       commitKatakana(el);
       return;
     }
@@ -1395,11 +1767,12 @@
       return;
     }
 
-    if (e.key.toLowerCase() === "x" && state.composing) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      showPreviousCandidate(el);
-      return;
+    if (e.key.toLowerCase() === "x" && state.composing && state.showingCandidate) {
+      if (showPreviousCandidate(el)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
     }
 
     if (state.composing && state.showingCandidate) {

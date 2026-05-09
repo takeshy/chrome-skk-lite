@@ -32,7 +32,7 @@
     "ya": "や", "yu": "ゆ", "yo": "よ",
     "xya": "ゃ", "xyu": "ゅ", "xyo": "ょ",
     "ra": "ら", "ri": "り", "ru": "る", "re": "れ", "ro": "ろ",
-    "wa": "わ", "wo": "を", "nn": "ん", "xtu": "っ",
+    "wa": "わ", "wi": "うぃ", "we": "うぇ", "wo": "を", "nn": "ん", "xtu": "っ",
     "ga": "が", "gi": "ぎ", "gu": "ぐ", "ge": "げ", "go": "ご",
     "za": "ざ", "ji": "じ", "zi": "じ", "zu": "ず", "ze": "ぜ", "zo": "ぞ",
     "da": "だ", "di": "ぢ", "du": "づ", "de": "で", "do": "ど",
@@ -59,9 +59,20 @@
   const SMALL_TSU_RE = /^([bcdfghjklmpqrstvwxyz])\1/;
   const SMALL_TSU_CONSONANTS = new Set("bcdfghjklmpqrstvwxyz");
   const N_FOLLOWERS = new Set("aiueoyn");
+  const ROMAN_PREFIXES = new Set();
+
+  for (const key of Object.keys(KANA_TABLE)) {
+    for (let len = 1; len < key.length; len++) {
+      ROMAN_PREFIXES.add(key.slice(0, len));
+    }
+  }
 
   function preeditKana(state) {
     return (state.kana || "") + (state.okuriKana || "");
+  }
+
+  function lookupKey(state) {
+    return state.okuriKey ? (state.kana || "") + state.okuriKey : (state.kana || "");
   }
 
   function abbrevPreedit(state) {
@@ -153,7 +164,18 @@
       }
     }
 
+    if (!ROMAN_PREFIXES.has(r)) {
+      state.roman = r.slice(1);
+    }
+
     return "";
+  }
+
+  function consumePendingN(state) {
+    if (state.roman !== "n") return "";
+    state.roman = "";
+    appendComposingKana(state, "ん");
+    return "ん";
   }
 
   return {
@@ -162,6 +184,7 @@
     ABBREV_PREFIX,
     KANA_TABLE,
     SMALL_TSU_RE,
+    lookupKey,
     preeditKana,
     abbrevPreedit,
     composingPreedit,
@@ -171,6 +194,7 @@
     isAbbrevChar,
     deleteComposingCharBeforeOffset,
     composingOffsetAfterBackspace,
-    consumeRomanChunk
+    consumeRomanChunk,
+    consumePendingN
   };
 });

@@ -24,7 +24,7 @@ OSにIMEをインストールできない環境や、ブラウザ内だけで完
 
 **使い方:**
 1. インストール後、任意のWebページを開きます。
-2. `Ctrl + J`（デフォルト）を押してSKKを有効にします。
+2. `Ctrl + J`（デフォルト）を押してSKKのかな入力にします。
 3. 画面右下に現在のモード（SKK かな / 変換など）が表示されます。
 
 **注意点:**
@@ -53,7 +53,7 @@ Ideal for environments where you cannot install an OS-level IME or prefer to kee
 
 **How to Use:**
 1. After installation, open any web page.
-2. Press `Ctrl + J` (default) to toggle SKK on.
+2. Press `Ctrl + J` (default) to enter SKK Hiragana mode.
 3. The current mode (e.g., SKK Hiragana, Conversion) will appear in the bottom-right corner.
 
 **Notes:**
