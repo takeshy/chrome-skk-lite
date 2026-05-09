@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SKK Lite for Inputs</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.7;
+    }
+
+    body {
+      margin: 0;
+      color: #18202f;
+      background: #f7f8fb;
+    }
+
+    main {
+      box-sizing: border-box;
+      width: min(760px, 100%);
+      margin: 0 auto;
+      padding: 48px 20px 72px;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: 32px;
+      line-height: 1.2;
+    }
+
+    p {
+      margin: 0 0 18px;
+    }
+
+    a {
+      color: #145ea8;
+      text-underline-offset: 3px;
+    }
+
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .links a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+      padding: 0 14px;
+      border: 1px solid #c8d2e0;
+      border-radius: 6px;
+      background: #fff;
+      text-decoration: none;
+      font-weight: 650;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        color: #e7ecf4;
+        background: #111827;
+      }
+
+      a {
+        color: #8ec5ff;
+      }
+
+      .links a {
+        border-color: #344155;
+        background: #172033;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SKK Lite for Inputs</h1>
+    <p>SKK Lite for Inputs is a Chrome extension that provides SKK-style Japanese input conversion inside supported web page input fields.</p>
+    <p>入力データは外部サーバーへ送信せず、変換処理とユーザー辞書の保存はローカルで行います。</p>
+    <div class="links">
+      <a href="./privacy/">Privacy Policy</a>
+      <a href="https://github.com/takeshy/chrome-skk-lite">GitHub Repository</a>
+    </div>
+  </main>
+</body>
+</html>
