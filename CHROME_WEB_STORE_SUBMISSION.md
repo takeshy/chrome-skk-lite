@@ -71,8 +71,8 @@ https://takeshy.github.io/chrome-skk-lite/privacy/
 Required images:
 
 - Extension icon: `icons/icon128.png` is included in the zip.
-- Small promotional image: 440 x 280 PNG.
-- At least one screenshot: 1280 x 800 or 640 x 400 PNG/JPEG, square corners, no padding.
+- Small promotional image: `store-assets/small-promo-440x280.png`.
+- Screenshot: `store-assets/screenshot-1280x800.png`.
 
 Suggested screenshots:
 

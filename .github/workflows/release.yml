@@ -21,13 +21,26 @@ jobs:
         with:
           node-version: 22
 
-      - name: Build extension package
-        run: node build_extension.js
-
-      - name: Create release archive
+      - name: Verify manifest version matches release tag
         run: |
-          cd build
-          zip -r "chrome-skk-lite-${{ github.event.release.tag_name }}.zip" chrome-skk-lite
+          node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+            const tag = process.env.RELEASE_TAG || "";
+            const expected = `v${manifest.version}`;
+            if (tag !== expected) {
+              console.error(`Release tag ${tag} does not match manifest version ${manifest.version}; expected ${expected}.`);
+              process.exit(1);
+            }
+          '
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+      - name: Build extension package
+        run: node scripts/package.js
+
+      - name: Rename release archive
+        run: mv build/chrome-skk-lite.zip "build/chrome-skk-lite-${{ github.event.release.tag_name }}.zip"
 
       - name: Upload archive to release
         env:

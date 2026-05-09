@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SKK Lite for Inputs",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "SKK-like Japanese input only inside Chrome page inputs.",
   "icons": {
     "16": "icons/icon16.png",
@@ -14,15 +14,9 @@
   "background": {
     "service_worker": "background.js"
   },
-  "commands": {
-    "toggle-skk": {
-      "suggested_key": {
-        "default": "Ctrl+J",
-        "linux": "Ctrl+J",
-        "windows": "Ctrl+J"
-      },
-      "description": "Enable SKK Lite hiragana mode"
-    }
+  "action": {
+    "default_title": "SKK Lite for Inputs",
+    "default_popup": "popup.html"
   },
   "content_scripts": [
     {

@@ -12,6 +12,8 @@
     "manifest.json",
     "background.js",
     "content.js",
+    "popup.html",
+    "popup.js",
     "options.html",
     "options.js",
     "skk_engine.js",

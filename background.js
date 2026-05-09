@@ -49,18 +49,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-chrome.commands.onCommand.addListener((command) => {
-  if (command === "toggle-skk") {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: "activate", source: "command" }).catch(err => {
-          console.warn("Could not send activation message to tab. Is the content script loaded?", err);
-        });
-      }
-    });
-  }
-});
-
 chrome.runtime.onInstalled.addListener(() => {
   warmupDictionaries();
 });

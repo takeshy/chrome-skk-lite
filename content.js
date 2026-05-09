@@ -474,6 +474,19 @@
     return keyCode === 106;
   }
 
+  function sendRuntimeMessage(message, callback) {
+    try {
+      const maybePromise = chrome.runtime?.sendMessage?.(message, callback);
+      if (maybePromise?.catch) {
+        maybePromise.catch(() => {});
+      }
+      return true;
+    } catch (error) {
+      console.debug("[SKK-LITE-V2] Runtime message unavailable:", error);
+      return false;
+    }
+  }
+
   function isCancelCandidateKeyEvent(e) {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
     const code = e.keyCode;
@@ -501,31 +514,85 @@
     state.enabled = true;
     reset();
     if (!wasEnabled) {
-      chrome.runtime.sendMessage({ type: "warmup" }).catch(() => {});
+      sendRuntimeMessage({ type: "warmup" });
     }
     console.log(`[SKK-LITE-V2] Entered kana mode via ${source}.`);
   }
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.type !== "activate" && message.type !== "toggle") return;
+  function currentStatus() {
+    const { mode, text } = getIndicatorMode();
+    return {
+      enabled: state.enabled,
+      mode,
+      text,
+      wideAscii: state.wideAscii,
+      composing: state.composing,
+      modalOpen: state.modalOpen
+    };
+  }
+
+  function deactivateSkk(source) {
+    if (state.modalOpen) {
+      return currentStatus();
+    }
+
+    const el = state.targetElement;
+    if (state.enabled && el?.isConnected && isEditable(el)) {
+      if (state.composing || state.roman) {
+        focusTargetElement();
+        if (!flushPendingRoman(el) && state.roman) {
+          insertText(el, state.roman);
+          state.roman = "";
+        }
+        if (state.composing) {
+          commitRawPreeditText(el);
+        }
+      }
+    }
+
+    state.enabled = false;
+    reset();
+    state.enabled = false;
+    updateIndicator();
+    console.log(`[SKK-LITE-V2] Disabled via ${source}.`);
+    return currentStatus();
+  }
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "get-state") {
+      sendResponse(currentStatus());
+      return false;
+    }
+
+    if (message.type === "deactivate") {
+      sendResponse(deactivateSkk(message.source || "message"));
+      return false;
+    }
+
+    if (message.type !== "activate" && message.type !== "toggle") return false;
 
     if (state.modalOpen) {
-      return;
+      sendResponse(currentStatus());
+      return false;
     }
 
     if (state.enabled && state.composing && state.targetElement) {
       commitCandidate(state.targetElement);
-      return;
+      sendResponse(currentStatus());
+      return false;
     }
 
     const now = Date.now();
     if (now - state.lastKeyToggleAt < TOGGLE_DEDUPE_MS) {
       console.debug("[SKK-LITE-V2] Ignored duplicate activation from command.");
-      return;
+      sendResponse(currentStatus());
+      return false;
     }
 
     state.lastCommandToggleAt = now;
     enterKanaMode(message.source || "message");
+    sendResponse(currentStatus());
+    return false;
   });
 
   function isEditable(el) {
@@ -1095,7 +1162,15 @@
     }
 
     const lookupPromise = new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "lookup", kana }, (response) => {
+      const sent = sendRuntimeMessage({ type: "lookup", kana }, (response) => {
+        if (chrome.runtime?.lastError) {
+          const userCandidates = userDict[kana] || [];
+          const historyCandidates = candidateHistory[kana] || [];
+          const merged = [...new Set([...historyCandidates, ...userCandidates])];
+          lookupCache.set(kana, Promise.resolve(merged));
+          resolve(merged);
+          return;
+        }
         const bgCandidates = response?.candidates || [];
         const userCandidates = userDict[kana] || [];
         const historyCandidates = candidateHistory[kana] || [];
@@ -1103,6 +1178,13 @@
         lookupCache.set(kana, Promise.resolve(merged));
         resolve(merged);
       });
+      if (!sent) {
+        const userCandidates = userDict[kana] || [];
+        const historyCandidates = candidateHistory[kana] || [];
+        const merged = [...new Set([...historyCandidates, ...userCandidates])];
+        lookupCache.set(kana, Promise.resolve(merged));
+        resolve(merged);
+      }
     });
     lookupCache.set(kana, lookupPromise);
     return lookupPromise;
