@@ -1857,6 +1857,16 @@
       }
     }
 
+    if (state.composing && state.showingCandidate && e.key === "/") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      commitCandidate(el);
+      if (canStartAbbrev()) {
+        startAbbrev(el);
+      }
+      return;
+    }
+
     if (state.composing && state.showingCandidate) {
       commitCandidate(el);
     }
