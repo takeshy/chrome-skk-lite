@@ -107,6 +107,16 @@ runTest("single n can be committed before special keys", () => {
   assert.equal(engine.composingPreedit(state), "▽ん");
 });
 
+runTest("n apostrophe commits n before vowels", () => {
+  const state = createState();
+
+  typeRoman(state, "n'a");
+
+  assert.equal(state.kana, "んあ");
+  assert.equal(state.roman, "");
+  assert.equal(engine.composingPreedit(state), "▽んあ");
+});
+
 runTest("backspace can replace the full previously rendered kana", () => {
   const state = createState();
 

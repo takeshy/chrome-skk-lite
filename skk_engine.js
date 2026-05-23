@@ -142,6 +142,12 @@
   function consumeRomanChunk(state) {
     const r = state.roman.toLowerCase();
 
+    if (r.startsWith("n'")) {
+      state.roman = r.slice(2);
+      appendComposingKana(state, "ん");
+      return "ん";
+    }
+
     if (r.length >= 2 && r[0] === r[1] && SMALL_TSU_CONSONANTS.has(r[0])) {
       state.roman = r.slice(1);
       appendComposingKana(state, "っ");

@@ -77,20 +77,93 @@
     lookupCache.clear();
   }
 
-  chrome.storage?.local?.get(["userDict", "candidateHistory"], (data) => {
+  function isExtensionContextError(error) {
+    return error?.message?.includes("Extension context invalidated");
+  }
+
+  function logStorageUnavailable(error) {
+    const level = isExtensionContextError(error) ? "debug" : "warn";
+    console[level]("[SKK-LITE-V2] Chrome storage unavailable:", error);
+  }
+
+  function readLastError() {
+    try {
+      return chrome.runtime?.lastError || null;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  function storageGet(keys) {
+    return new Promise((resolve) => {
+      try {
+        const get = chrome.storage?.local?.get;
+        if (!get) {
+          logStorageUnavailable(new Error("chrome.storage.local.get is unavailable"));
+          resolve({ ok: false, data: {} });
+          return;
+        }
+
+        get.call(chrome.storage.local, keys, (data) => {
+          const error = readLastError();
+          if (error) {
+            logStorageUnavailable(error);
+            resolve({ ok: false, data: {} });
+            return;
+          }
+          resolve({ ok: true, data: data || {} });
+        });
+      } catch (error) {
+        logStorageUnavailable(error);
+        resolve({ ok: false, data: {} });
+      }
+    });
+  }
+
+  function storageSet(values) {
+    return new Promise((resolve) => {
+      try {
+        const set = chrome.storage?.local?.set;
+        if (!set) {
+          logStorageUnavailable(new Error("chrome.storage.local.set is unavailable"));
+          resolve(false);
+          return;
+        }
+
+        set.call(chrome.storage.local, values, () => {
+          const error = readLastError();
+          if (error) {
+            logStorageUnavailable(error);
+            resolve(false);
+            return;
+          }
+          resolve(true);
+        });
+      } catch (error) {
+        logStorageUnavailable(error);
+        resolve(false);
+      }
+    });
+  }
+
+  storageGet(["userDict", "candidateHistory"]).then(({ data }) => {
     syncUserDict(data.userDict);
     syncCandidateHistory(data.candidateHistory);
   });
 
-  chrome.storage?.onChanged?.addListener((changes, areaName) => {
-    if (areaName !== "local") return;
-    if (changes.userDict) {
-      syncUserDict(changes.userDict.newValue);
-    }
-    if (changes.candidateHistory) {
-      syncCandidateHistory(changes.candidateHistory.newValue);
-    }
-  });
+  try {
+    chrome.storage?.onChanged?.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      if (changes.userDict) {
+        syncUserDict(changes.userDict.newValue);
+      }
+      if (changes.candidateHistory) {
+        syncCandidateHistory(changes.candidateHistory.newValue);
+      }
+    });
+  } catch (error) {
+    logStorageUnavailable(error);
+  }
 
   function ensureIndicator() {
     if (indicatorBadge) return indicatorBadge;
@@ -437,6 +510,7 @@
       code === 44 ||
       code === 45 ||
       code === 46 ||
+      code === 39 ||
       code === 91 ||
       code === 93
     );
@@ -1069,18 +1143,6 @@
     });
   }
 
-  function storageGet(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(keys, resolve);
-    });
-  }
-
-  function storageSet(values) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set(values, resolve);
-    });
-  }
-
   function insertUnicodeFromRegisterInput() {
     const input = registerModalEls?.input;
     if (!input) return false;
@@ -1130,11 +1192,21 @@
       return;
     }
 
-    const data = await storageGet(["userDict"]);
+    const { ok, data } = await storageGet(["userDict"]);
+    if (!ok) {
+      registerModalEls.error.textContent = "辞書を読み込めないため登録できません。";
+      return;
+    }
+
     const nextUserDict = { ...(data.userDict || {}) };
     const existing = Array.isArray(nextUserDict[key]) ? nextUserDict[key] : [];
     nextUserDict[key] = [value, ...existing.filter((candidate) => candidate !== value)];
-    await storageSet({ userDict: nextUserDict });
+    const saved = await storageSet({ userDict: nextUserDict });
+    if (!saved) {
+      registerModalEls.error.textContent = "辞書を保存できませんでした。";
+      return;
+    }
+
     syncUserDict(nextUserDict);
 
     if (modalContext) {
@@ -1446,7 +1518,20 @@
       return;
     }
 
-    state.candidates = await lookupAny(lookupKeys());
+    const requestKey = lookupKey();
+    const requestKeys = lookupKeys();
+    const candidates = await lookupAny(requestKeys);
+    if (
+      !state.composing ||
+      state.targetElement !== el ||
+      state.roman ||
+      state.candidates.length ||
+      lookupKey() !== requestKey
+    ) {
+      return;
+    }
+
+    state.candidates = candidates;
     state.candidateIndex = 0;
     state.replacedLength = composingPreedit().length;
     if (state.candidates.length) {
@@ -1460,7 +1545,20 @@
     if (!flushPendingRoman(el)) return;
 
     if (!state.candidates.length) {
-      state.candidates = await lookupAny(lookupKeys());
+      const requestKey = lookupKey();
+      const requestKeys = lookupKeys();
+      const candidates = await lookupAny(requestKeys);
+      if (
+        !state.composing ||
+        state.targetElement !== el ||
+        state.roman ||
+        state.candidates.length ||
+        lookupKey() !== requestKey
+      ) {
+        return;
+      }
+
+      state.candidates = candidates;
       state.candidateIndex = 0;
       state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
@@ -1771,8 +1869,9 @@
     if (e.key === "Backspace") {
       if (state.wideAscii) return;
       if (handleAbbrevBackspace(el, e)) return;
-      e.stopImmediatePropagation();
-      handleBackspace(el, e);
+      if (handleBackspace(el, e)) {
+        e.stopImmediatePropagation();
+      }
       return;
     }
 
