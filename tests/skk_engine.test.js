@@ -58,6 +58,18 @@ runTest("we composes to u-small-e", () => {
   assert.equal(engine.composingPreedit(state), "▽うぇ");
 });
 
+runTest("tye and che compose to chi-small-e", () => {
+  for (const roman of ["tye", "che"]) {
+    const state = createState();
+
+    typeRoman(state, roman);
+
+    assert.equal(state.kana, "ちぇ");
+    assert.equal(state.roman, "");
+    assert.equal(engine.composingPreedit(state), "▽ちぇ");
+  }
+});
+
 runTest("xi composes to small i", () => {
   const state = createState();
 
