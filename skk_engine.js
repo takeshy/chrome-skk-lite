@@ -18,6 +18,7 @@
 
   const HENKAN_PREFIX = "▽";
   const ABBREV_PREFIX = "▽/";
+  const OKURI_MARKER = "*";
 
   const KANA_TABLE = {
     "-": "ー", ",": "、", ".": "。", "[": "「", "]": "」",
@@ -80,6 +81,9 @@
   }
 
   function composingPreedit(state) {
+    if (state.okuriKey) {
+      return HENKAN_PREFIX + (state.kana || "") + OKURI_MARKER + (state.okuriKana || "");
+    }
     return HENKAN_PREFIX + preeditKana(state);
   }
 
@@ -137,17 +141,21 @@
 
   function deleteComposingCharBeforeOffset(state, offset) {
     const prefixLength = HENKAN_PREFIX.length;
-    const kana = preeditKana(state);
-    if (!state.composing || offset <= prefixLength || offset > prefixLength + kana.length) {
+    const stemLength = (state.kana || "").length;
+    const hasOkuri = !!state.okuriKey;
+    const okuriLength = (state.okuriKana || "").length;
+    const totalLength = stemLength + (hasOkuri ? OKURI_MARKER.length + okuriLength : okuriLength);
+    if (!state.composing || offset <= prefixLength || offset > prefixLength + totalLength) {
       return false;
     }
 
     const kanaIndex = offset - prefixLength - 1;
-    const stemLength = (state.kana || "").length;
     if (kanaIndex < stemLength) {
       state.kana = state.kana.slice(0, kanaIndex) + state.kana.slice(kanaIndex + 1);
+    } else if (hasOkuri && kanaIndex === stemLength) {
+      foldOkuriIntoStem(state);
     } else {
-      const okuriIndex = kanaIndex - stemLength;
+      const okuriIndex = kanaIndex - stemLength - (hasOkuri ? OKURI_MARKER.length : 0);
       state.okuriKana = state.okuriKana.slice(0, okuriIndex) + state.okuriKana.slice(okuriIndex + 1);
     }
     invalidateCandidates(state);
@@ -197,6 +205,87 @@
     return "";
   }
 
+  const KANJI_DIGITS = "〇一二三四五六七八九";
+
+  function toFullWidthDigits(text) {
+    return text.replace(/[0-9]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0xfee0));
+  }
+
+  function toKanjiDigits(text) {
+    return text.replace(/[0-9]/g, (ch) => KANJI_DIGITS[ch.charCodeAt(0) - 48]);
+  }
+
+  function toKanjiNumeral(text) {
+    if (!/^[0-9]+$/.test(text)) return text;
+    const digits = text.replace(/^0+(?=.)/, "");
+    if (digits === "0") return "〇";
+
+    const groups = [];
+    for (let end = digits.length; end > 0; end -= 4) {
+      groups.unshift(digits.slice(Math.max(0, end - 4), end));
+    }
+    const groupUnits = ["", "万", "億", "兆", "京"];
+    if (groups.length > groupUnits.length) return toKanjiDigits(digits);
+
+    const smallUnits = ["", "十", "百", "千"];
+    let result = "";
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      let part = "";
+      for (let j = 0; j < group.length; j++) {
+        const digit = group.charCodeAt(j) - 48;
+        if (!digit) continue;
+        const unit = smallUnits[group.length - 1 - j];
+        part += digit === 1 && unit ? unit : KANJI_DIGITS[digit] + unit;
+      }
+      if (part) part += groupUnits[groups.length - 1 - i];
+      result += part;
+    }
+    return result || "〇";
+  }
+
+  function applyNumericCandidate(candidate, numbers) {
+    let index = 0;
+    return candidate.replace(/#([0-9])/g, (match, type) => {
+      const number = numbers[index] ?? "";
+      index += 1;
+      if (type === "1") return toFullWidthDigits(number);
+      if (type === "2") return toKanjiDigits(number);
+      if (type === "3") return toKanjiNumeral(number);
+      return number;
+    });
+  }
+
+  const HALF_KATAKANA_MAP = {
+    "ア": "ｱ", "イ": "ｲ", "ウ": "ｳ", "エ": "ｴ", "オ": "ｵ",
+    "カ": "ｶ", "キ": "ｷ", "ク": "ｸ", "ケ": "ｹ", "コ": "ｺ",
+    "サ": "ｻ", "シ": "ｼ", "ス": "ｽ", "セ": "ｾ", "ソ": "ｿ",
+    "タ": "ﾀ", "チ": "ﾁ", "ツ": "ﾂ", "テ": "ﾃ", "ト": "ﾄ",
+    "ナ": "ﾅ", "ニ": "ﾆ", "ヌ": "ﾇ", "ネ": "ﾈ", "ノ": "ﾉ",
+    "ハ": "ﾊ", "ヒ": "ﾋ", "フ": "ﾌ", "ヘ": "ﾍ", "ホ": "ﾎ",
+    "マ": "ﾏ", "ミ": "ﾐ", "ム": "ﾑ", "メ": "ﾒ", "モ": "ﾓ",
+    "ヤ": "ﾔ", "ユ": "ﾕ", "ヨ": "ﾖ",
+    "ラ": "ﾗ", "リ": "ﾘ", "ル": "ﾙ", "レ": "ﾚ", "ロ": "ﾛ",
+    "ワ": "ﾜ", "ヲ": "ｦ", "ン": "ﾝ",
+    "ァ": "ｧ", "ィ": "ｨ", "ゥ": "ｩ", "ェ": "ｪ", "ォ": "ｫ",
+    "ッ": "ｯ", "ャ": "ｬ", "ュ": "ｭ", "ョ": "ｮ",
+    "ガ": "ｶﾞ", "ギ": "ｷﾞ", "グ": "ｸﾞ", "ゲ": "ｹﾞ", "ゴ": "ｺﾞ",
+    "ザ": "ｻﾞ", "ジ": "ｼﾞ", "ズ": "ｽﾞ", "ゼ": "ｾﾞ", "ゾ": "ｿﾞ",
+    "ダ": "ﾀﾞ", "ヂ": "ﾁﾞ", "ヅ": "ﾂﾞ", "デ": "ﾃﾞ", "ド": "ﾄﾞ",
+    "バ": "ﾊﾞ", "ビ": "ﾋﾞ", "ブ": "ﾌﾞ", "ベ": "ﾍﾞ", "ボ": "ﾎﾞ",
+    "パ": "ﾊﾟ", "ピ": "ﾋﾟ", "プ": "ﾌﾟ", "ペ": "ﾍﾟ", "ポ": "ﾎﾟ",
+    "ヴ": "ｳﾞ",
+    "ー": "ｰ", "。": "｡", "、": "､", "「": "｢", "」": "｣", "・": "･"
+  };
+
+  function toHalfWidthKatakana(text) {
+    let result = "";
+    for (const ch of text) {
+      result += HALF_KATAKANA_MAP[ch] ?? ch;
+    }
+    return result;
+  }
+
   function consumePendingN(state) {
     if (state.roman !== "n") return "";
     state.roman = "";
@@ -208,6 +297,7 @@
     STATE,
     HENKAN_PREFIX,
     ABBREV_PREFIX,
+    OKURI_MARKER,
     KANA_TABLE,
     SMALL_TSU_RE,
     lookupKey,
@@ -222,6 +312,8 @@
     deleteComposingCharBeforeOffset,
     composingOffsetAfterBackspace,
     consumeRomanChunk,
-    consumePendingN
+    consumePendingN,
+    applyNumericCandidate,
+    toHalfWidthKatakana
   };
 });
