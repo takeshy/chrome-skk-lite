@@ -201,3 +201,57 @@ runTest("backspace in the middle of composing preedit deletes matching kana", ()
   assert.equal(engine.composingPreedit(state), "▽もた");
   assert.equal(engine.composingOffsetAfterBackspace(3), 2);
 });
+
+runTest("editing the reading invalidates stale candidates", () => {
+  const state = createState();
+  state.kana = "てすと";
+  state.candidates = ["テスト", "TEST"];
+  state.candidateIndex = 1;
+  state.replacedLength = engine.composingPreedit(state).length;
+
+  const deleted = engine.deleteComposingCharBeforeOffset(state, 4);
+
+  assert.equal(deleted, true);
+  assert.equal(state.kana, "てす");
+  assert.deepEqual(state.candidates, []);
+  assert.equal(state.candidateIndex, 0);
+});
+
+runTest("appending kana invalidates stale candidates", () => {
+  const state = createState();
+  state.kana = "てす";
+  state.candidates = ["テスト", "TEST"];
+  state.candidateIndex = 1;
+
+  typeRoman(state, "ra");
+
+  assert.equal(state.kana, "てすら");
+  assert.deepEqual(state.candidates, []);
+  assert.equal(state.candidateIndex, 0);
+});
+
+runTest("failed okuri conversion folds okuri back into the stem", () => {
+  const state = createState();
+  state.kana = "ようきろく";
+  state.okuriKey = "g";
+  state.okuriKana = "がかり";
+
+  assert.equal(engine.lookupKey(state), "ようきろくg");
+
+  const folded = engine.foldOkuriIntoStem(state);
+
+  assert.equal(folded, true);
+  assert.equal(state.kana, "ようきろくがかり");
+  assert.equal(state.okuriKey, "");
+  assert.equal(state.okuriKana, "");
+  assert.equal(engine.lookupKey(state), "ようきろくがかり");
+  assert.equal(engine.composingPreedit(state), "▽ようきろくがかり");
+});
+
+runTest("fold is a no-op without okuri state", () => {
+  const state = createState();
+  state.kana = "ようきろく";
+
+  assert.equal(engine.foldOkuriIntoStem(state), false);
+  assert.equal(state.kana, "ようきろく");
+});

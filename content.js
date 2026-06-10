@@ -1531,12 +1531,15 @@
       return;
     }
 
+    if (!candidates.length) {
+      engine.foldOkuriIntoStem(state);
+      return;
+    }
+
     state.candidates = candidates;
     state.candidateIndex = 0;
     state.replacedLength = composingPreedit().length;
-    if (state.candidates.length) {
-      showCandidate(el);
-    }
+    showCandidate(el);
   }
 
   async function showNextCandidate(el) {
@@ -1562,6 +1565,10 @@
       state.candidateIndex = 0;
       state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
+        if (engine.foldOkuriIntoStem(state)) {
+          void showNextCandidate(el);
+          return;
+        }
         if (state.modalOpen && isRegisterInputElement(el)) {
           showPreedit(el);
         } else {
@@ -1580,7 +1587,11 @@
     }
 
     if (state.candidateIndex >= state.candidates.length - 1) {
-      openRegisterModal();
+      if (state.modalOpen && isRegisterInputElement(el)) {
+        showPreedit(el);
+      } else {
+        openRegisterModal();
+      }
       return;
     }
 
@@ -1758,6 +1769,8 @@
     } else if (state.kana) {
       state.kana = state.kana.slice(0, -1);
     }
+    state.candidates = [];
+    state.candidateIndex = 0;
 
     if (!preeditKana()) {
       if (shouldRenderPreeditInTarget(el)) {

@@ -89,6 +89,15 @@
     return preeditKana(state).length;
   }
 
+  function invalidateCandidates(state) {
+    if (Array.isArray(state.candidates) && state.candidates.length) {
+      state.candidates = [];
+    }
+    if (state.candidateIndex) {
+      state.candidateIndex = 0;
+    }
+  }
+
   function appendComposingKana(state, kana) {
     if (!state.composing) return;
     if (state.okuriKey) {
@@ -96,7 +105,17 @@
     } else {
       state.kana += kana;
     }
+    invalidateCandidates(state);
     state.replacedLength = composingPreedit(state).length;
+  }
+
+  function foldOkuriIntoStem(state) {
+    if (!state.okuriKey && !state.okuriKana) return false;
+    state.kana = (state.kana || "") + (state.okuriKana || "");
+    state.okuriKey = "";
+    state.okuriKana = "";
+    state.replacedLength = composingPreedit(state).length;
+    return true;
   }
 
   function shouldStartOkuri(state, key) {
@@ -131,6 +150,7 @@
       const okuriIndex = kanaIndex - stemLength;
       state.okuriKana = state.okuriKana.slice(0, okuriIndex) + state.okuriKana.slice(okuriIndex + 1);
     }
+    invalidateCandidates(state);
     state.replacedLength = composingPreedit(state).length;
     return true;
   }
@@ -196,6 +216,7 @@
     composingPreedit,
     currentRenderedLength,
     appendComposingKana,
+    foldOkuriIntoStem,
     shouldStartOkuri,
     isAbbrevChar,
     deleteComposingCharBeforeOffset,
