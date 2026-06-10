@@ -22,7 +22,22 @@ function createZipArchive() {
     return;
   }
 
-  execFileSync("zip", ["-qr", ZIP_FILE, "."], { cwd: PACKAGE_DIR, stdio: "inherit" });
+  try {
+    execFileSync("zip", ["-qr", ZIP_FILE, "."], { cwd: PACKAGE_DIR, stdio: "inherit" });
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    // `zip` is unavailable (e.g. stock WSL); fall back to python3's zipfile module.
+    const script = [
+      "import os, sys, zipfile",
+      "src, dst = sys.argv[1], sys.argv[2]",
+      "with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as zf:",
+      "    for root, dirs, files in os.walk(src):",
+      "        for name in files:",
+      "            path = os.path.join(root, name)",
+      "            zf.write(path, os.path.relpath(path, src))"
+    ].join("\n");
+    execFileSync("python3", ["-c", script, PACKAGE_DIR, ZIP_FILE], { stdio: "inherit" });
+  }
 }
 
 function main() {

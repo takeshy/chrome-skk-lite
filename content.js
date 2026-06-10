@@ -12,10 +12,18 @@
   // - /: enter Abbrev mode from an empty kana buffer.
   // - l: return to ASCII mode.
   // - L: enter full-width ASCII mode.
+  // - q: toggle katakana mode (Ctrl+Q: half-width katakana mode).
+  //   While composing, q / Ctrl+Q commit the preedit as (half-width) katakana.
   // - Hiragana mode: roman input -> kana.
   // - Shift+letter at beginning of a word: start conversion buffer.
-  // - Space: convert current kana buffer using tiny dictionary.
-  // - x: move back through candidates.
+  //   ; also starts the buffer (sticky shift); a second ; marks the okuri position.
+  // - Space: convert current kana buffer using the dictionary.
+  //   From the 5th candidate a list is shown; select with A/S/D/F/J/K/L.
+  // - x: move back through candidates (or list pages).
+  // - X: purge the shown candidate from the user dictionary / history.
+  // - Tab: complete the reading from previously converted readings.
+  // - >: prefix/suffix conversion (▽せつ> or ▽>てき).
+  // - Digits in the reading use numeric conversion (#0-#3 dictionary entries).
   // - Enter: commit current candidate.
   // - Escape: cancel conversion/preedit or close register modal.
   //
@@ -37,15 +45,19 @@
     enabled: false,
     mode: engine.STATE.SKK_KANA,
     wideAscii: false,
+    katakanaMode: null,
     roman: "",
     abbrev: "",
     composing: false,
     kana: "",
     okuriKey: "",
     okuriKana: "",
+    stickyOkuri: false,
     candidates: [],
     candidateIndex: 0,
     showingCandidate: false,
+    completionMatches: null,
+    completionIndex: 0,
     modalOpen: false,
     modalContext: null,
     replacedLength: 0,
@@ -64,8 +76,18 @@
     j: "↓",
     k: "↑",
     l: "→",
-    " ": "　"
+    " ": "　",
+    ".": "…",
+    ",": "‥",
+    "-": "～",
+    "/": "・",
+    "[": "『",
+    "]": "』"
   };
+
+  const INLINE_CANDIDATES = 4;
+  const LIST_PAGE_SIZE = 7;
+  const LIST_LABELS = ["a", "s", "d", "f", "j", "k", "l"];
 
   function syncUserDict(nextUserDict) {
     userDict = nextUserDict || {};
@@ -216,6 +238,9 @@
       }
       .badge[data-mode="candidate"] {
         background: rgba(42, 126, 80, 0.94);
+      }
+      .badge[data-mode="katakana"] {
+        background: rgba(19, 122, 127, 0.94);
       }
     `;
 
@@ -474,6 +499,8 @@
     if (isAbbrevMode()) return { mode: "abbrev", text: "SKK 略語" };
     if (state.composing && state.showingCandidate) return { mode: "candidate", text: "SKK 候補" };
     if (state.composing) return { mode: "compose", text: "SKK 変換" };
+    if (state.katakanaMode === "han") return { mode: "katakana", text: "SKK 半ｶﾅ" };
+    if (state.katakanaMode === "zen") return { mode: "katakana", text: "SKK カナ" };
     return { mode: "kana", text: "SKK かな" };
   }
 
@@ -586,6 +613,7 @@
   function enterKanaMode(source) {
     const wasEnabled = state.enabled;
     state.enabled = true;
+    state.katakanaMode = null;
     reset();
     if (!wasEnabled) {
       sendRuntimeMessage({ type: "warmup" });
@@ -908,6 +936,17 @@
     return text.replace(/[\u3041-\u3096]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) + 0x60));
   }
 
+  function toggleKatakanaMode(kind) {
+    state.katakanaMode = state.katakanaMode === kind ? null : kind;
+    updateIndicator();
+  }
+
+  function applyKatakanaMode(text) {
+    if (!state.katakanaMode || state.composing || isAbbrevMode()) return text;
+    const katakana = toKatakana(text);
+    return state.katakanaMode === "han" ? engine.toHalfWidthKatakana(katakana) : katakana;
+  }
+
   function preeditKana() {
     return engine.preeditKana(state);
   }
@@ -921,7 +960,14 @@
 
   function lookupKeys() {
     const primary = lookupKey();
-    return [primary];
+    const keys = [{ key: primary, numbers: null }];
+    if (/[0-9]/.test(primary)) {
+      keys.push({
+        key: primary.replace(/[0-9]+/g, "#"),
+        numbers: primary.match(/[0-9]+/g)
+      });
+    }
+    return keys;
   }
 
   function abbrevPreedit() {
@@ -932,9 +978,40 @@
     return engine.composingPreedit(state);
   }
 
+  function candidateWord(candidate) {
+    const index = candidate.indexOf(";");
+    return index === -1 ? candidate : candidate.slice(0, index);
+  }
+
+  function candidateAnnotation(candidate) {
+    const index = candidate.indexOf(";");
+    return index === -1 ? "" : candidate.slice(index + 1);
+  }
+
   function candidateText() {
-    const stem = state.candidates[state.candidateIndex] || state.kana;
+    const raw = state.candidates[state.candidateIndex];
+    const stem = raw ? candidateWord(raw) : state.kana;
     return state.okuriKey ? stem + state.okuriKana : stem;
+  }
+
+  function candidateListActive(el) {
+    return (
+      state.composing &&
+      state.showingCandidate &&
+      state.candidateIndex >= INLINE_CANDIDATES &&
+      !shouldRenderPreeditInTarget(el)
+    );
+  }
+
+  function candidateListText() {
+    const start = state.candidateIndex;
+    const end = Math.min(start + LIST_PAGE_SIZE, state.candidates.length);
+    const parts = [];
+    for (let i = start; i < end; i++) {
+      parts.push(`${LIST_LABELS[i - start].toUpperCase()}:${candidateWord(state.candidates[i])}`);
+    }
+    parts.push(`[${start + 1}-${end}/${state.candidates.length}]`);
+    return parts.join("  ");
   }
 
   function currentRenderedLength() {
@@ -983,7 +1060,15 @@
   function showCandidate(el) {
     const text = candidateText();
     if (!shouldRenderPreeditInTarget(el)) {
-      showPreeditPopup(el, text, "candidate");
+      let displayText = text;
+      if (state.candidateIndex >= INLINE_CANDIDATES) {
+        displayText = candidateListText();
+      } else {
+        const raw = state.candidates[state.candidateIndex];
+        const annotation = raw ? candidateAnnotation(raw) : "";
+        if (annotation) displayText = `${text} ※${annotation}`;
+      }
+      showPreeditPopup(el, displayText, "candidate");
       state.replacedLength = text.length;
       state.showingCandidate = true;
       state.mode = engine.STATE.SKK_CANDIDATE;
@@ -1028,6 +1113,7 @@
     }
     state.okuriKey = key.toLowerCase();
     state.okuriKana = "";
+    state.stickyOkuri = false;
     state.candidates = [];
     state.candidateIndex = 0;
     state.showingCandidate = false;
@@ -1066,9 +1152,12 @@
     state.kana = "";
     state.okuriKey = "";
     state.okuriKana = "";
+    state.stickyOkuri = false;
     state.candidates = [];
     state.candidateIndex = 0;
     state.showingCandidate = false;
+    state.completionMatches = null;
+    state.completionIndex = 0;
     state.replacedLength = 0;
     clearRenderedRange();
     hidePreeditPopup();
@@ -1210,7 +1299,10 @@
     syncUserDict(nextUserDict);
 
     if (modalContext) {
-      modalContext.candidates = [value, ...modalContext.candidates.filter((candidate) => candidate !== value)];
+      modalContext.candidates = [
+        value,
+        ...modalContext.candidates.filter((candidate) => candidateWord(candidate) !== value)
+      ];
       modalContext.candidateIndex = 0;
       modalContext.showingCandidate = true;
     }
@@ -1228,6 +1320,20 @@
     }
   }
 
+  function mergeCandidateLists(lists) {
+    const merged = [];
+    const seen = new Set();
+    for (const list of lists) {
+      for (const candidate of list) {
+        const word = candidateWord(candidate);
+        if (!word || seen.has(word)) continue;
+        seen.add(word);
+        merged.push(candidate);
+      }
+    }
+    return merged;
+  }
+
   async function lookup(kana) {
     if (lookupCache.has(kana)) {
       return lookupCache.get(kana);
@@ -1236,24 +1342,21 @@
     const lookupPromise = new Promise((resolve) => {
       const sent = sendRuntimeMessage({ type: "lookup", kana }, (response) => {
         if (chrome.runtime?.lastError) {
-          const userCandidates = userDict[kana] || [];
-          const historyCandidates = candidateHistory[kana] || [];
-          const merged = [...new Set([...historyCandidates, ...userCandidates])];
+          const merged = mergeCandidateLists([candidateHistory[kana] || [], userDict[kana] || []]);
           lookupCache.set(kana, Promise.resolve(merged));
           resolve(merged);
           return;
         }
-        const bgCandidates = response?.candidates || [];
-        const userCandidates = userDict[kana] || [];
-        const historyCandidates = candidateHistory[kana] || [];
-        const merged = [...new Set([...historyCandidates, ...userCandidates, ...bgCandidates])];
+        const merged = mergeCandidateLists([
+          candidateHistory[kana] || [],
+          userDict[kana] || [],
+          response?.candidates || []
+        ]);
         lookupCache.set(kana, Promise.resolve(merged));
         resolve(merged);
       });
       if (!sent) {
-        const userCandidates = userDict[kana] || [];
-        const historyCandidates = candidateHistory[kana] || [];
-        const merged = [...new Set([...historyCandidates, ...userCandidates])];
+        const merged = mergeCandidateLists([candidateHistory[kana] || [], userDict[kana] || []]);
         lookupCache.set(kana, Promise.resolve(merged));
         resolve(merged);
       }
@@ -1264,10 +1367,15 @@
 
   async function lookupAny(keys) {
     const merged = [];
-    for (const key of keys) {
+    const seen = new Set();
+    for (const { key, numbers } of keys) {
       const candidates = await lookup(key);
       for (const candidate of candidates) {
-        if (!merged.includes(candidate)) merged.push(candidate);
+        const text = numbers ? engine.applyNumericCandidate(candidate, numbers) : candidate;
+        const word = candidateWord(text);
+        if (!word || seen.has(word)) continue;
+        seen.add(word);
+        merged.push(text);
       }
     }
     return merged;
@@ -1287,7 +1395,8 @@
   function commitCandidate(el) {
     if (!state.composing) return;
     const committedKey = lookupKey();
-    const selectedCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
+    const rawCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
+    const selectedCandidate = rawCandidate ? candidateWord(rawCandidate) : "";
     const text = state.showingCandidate ? candidateText() : preeditKana();
     if (shouldRenderPreeditInTarget(el)) {
       replaceRendered(el, text);
@@ -1307,9 +1416,10 @@
     reset();
   }
 
-  function commitKatakana(el) {
+  function commitKatakana(el, half = false) {
     if (!state.composing || !preeditKana()) return false;
-    const text = toKatakana(preeditKana());
+    const katakana = toKatakana(preeditKana());
+    const text = half ? engine.toHalfWidthKatakana(katakana) : katakana;
     if (shouldRenderPreeditInTarget(el)) {
       replaceRendered(el, text);
     } else {
@@ -1531,12 +1641,15 @@
       return;
     }
 
+    if (!candidates.length) {
+      engine.foldOkuriIntoStem(state);
+      return;
+    }
+
     state.candidates = candidates;
     state.candidateIndex = 0;
     state.replacedLength = composingPreedit().length;
-    if (state.candidates.length) {
-      showCandidate(el);
-    }
+    showCandidate(el);
   }
 
   async function showNextCandidate(el) {
@@ -1562,6 +1675,10 @@
       state.candidateIndex = 0;
       state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
+        if (engine.foldOkuriIntoStem(state)) {
+          void showNextCandidate(el);
+          return;
+        }
         if (state.modalOpen && isRegisterInputElement(el)) {
           showPreedit(el);
         } else {
@@ -1579,12 +1696,21 @@
       return;
     }
 
-    if (state.candidateIndex >= state.candidates.length - 1) {
-      openRegisterModal();
+    const listActive = candidateListActive(el);
+    const nextIndex = state.candidateIndex + (listActive ? LIST_PAGE_SIZE : 1);
+    const exhausted = listActive
+      ? nextIndex >= state.candidates.length
+      : state.candidateIndex >= state.candidates.length - 1;
+    if (exhausted) {
+      if (state.modalOpen && isRegisterInputElement(el)) {
+        showPreedit(el);
+      } else {
+        openRegisterModal();
+      }
       return;
     }
 
-    state.candidateIndex += 1;
+    state.candidateIndex = nextIndex;
     showCandidate(el);
   }
 
@@ -1597,9 +1723,73 @@
       return true;
     }
 
+    if (candidateListActive(el)) {
+      state.candidateIndex =
+        state.candidateIndex - LIST_PAGE_SIZE >= INLINE_CANDIDATES
+          ? state.candidateIndex - LIST_PAGE_SIZE
+          : INLINE_CANDIDATES - 1;
+      showCandidate(el);
+      return true;
+    }
+
     state.candidateIndex -= 1;
     showCandidate(el);
     return true;
+  }
+
+  function handleCompletion(el) {
+    const current = state.kana;
+    if (!state.completionMatches || !state.completionMatches.includes(current)) {
+      if (!current) return;
+      const keys = [...new Set([...Object.keys(candidateHistory), ...Object.keys(userDict)])].filter(
+        (key) => key.startsWith(current) && key !== current && !/[a-z>#]/.test(key)
+      );
+      if (!keys.length) return;
+      state.completionMatches = [current, ...keys];
+      state.completionIndex = 0;
+    }
+    state.completionIndex = (state.completionIndex + 1) % state.completionMatches.length;
+    state.kana = state.completionMatches[state.completionIndex];
+    state.candidates = [];
+    state.candidateIndex = 0;
+    showPreedit(el);
+  }
+
+  async function purgeCurrentCandidate(el) {
+    if (!state.composing || !state.showingCandidate || !state.candidates.length) return;
+    const key = lookupKey();
+    const word = candidateWord(state.candidates[state.candidateIndex] || "");
+    if (!key || !word) return;
+
+    const nextCandidateHistory = { ...candidateHistory };
+    if (Array.isArray(nextCandidateHistory[key])) {
+      nextCandidateHistory[key] = nextCandidateHistory[key].filter(
+        (item) => candidateWord(item) !== word
+      );
+      if (!nextCandidateHistory[key].length) delete nextCandidateHistory[key];
+    }
+    syncCandidateHistory(nextCandidateHistory);
+
+    const { ok, data } = await storageGet(["userDict"]);
+    const nextUserDict = { ...((ok && data.userDict) || userDict) };
+    if (Array.isArray(nextUserDict[key])) {
+      nextUserDict[key] = nextUserDict[key].filter((item) => candidateWord(item) !== word);
+      if (!nextUserDict[key].length) delete nextUserDict[key];
+    }
+    syncUserDict(nextUserDict);
+    void storageSet({ candidateHistory: nextCandidateHistory, userDict: nextUserDict });
+
+    if (!state.composing || !state.showingCandidate) return;
+    state.candidates = state.candidates.filter((item) => candidateWord(item) !== word);
+    if (!state.candidates.length) {
+      state.candidateIndex = 0;
+      showPreedit(el);
+      return;
+    }
+    if (state.candidateIndex >= state.candidates.length) {
+      state.candidateIndex = state.candidates.length - 1;
+    }
+    showCandidate(el);
   }
 
   function cancelCandidateSelection(el) {
@@ -1638,7 +1828,7 @@
       showPreedit(el);
     } else {
       const trackRange = state.composing || isAbbrevMode();
-      insertText(el, kana, { trackRange });
+      insertText(el, applyKatakanaMode(kana), { trackRange });
       if (state.composing || isAbbrevMode()) {
         setRenderedRangeFromCaret(el, state.replacedLength);
       }
@@ -1663,7 +1853,7 @@
           showPreedit(el);
         } else {
           const trackRange = state.composing || isAbbrevMode();
-          insertText(el, kana, { trackRange });
+          insertText(el, applyKatakanaMode(kana), { trackRange });
           if (state.composing || isAbbrevMode()) {
             setRenderedRangeFromCaret(el, state.replacedLength);
           }
@@ -1689,6 +1879,14 @@
       } else if (engine.shouldStartOkuri(state, ch)) {
         startOkuri(el, ch);
       }
+    } else if (
+      state.stickyOkuri &&
+      state.composing &&
+      !state.okuriKey &&
+      state.kana &&
+      /^[a-z]$/.test(ch)
+    ) {
+      startOkuri(el, ch);
     }
 
     if (state.showingCandidate) {
@@ -1758,6 +1956,8 @@
     } else if (state.kana) {
       state.kana = state.kana.slice(0, -1);
     }
+    state.candidates = [];
+    state.candidateIndex = 0;
 
     if (!preeditKana()) {
       if (shouldRenderPreeditInTarget(el)) {
@@ -1829,7 +2029,28 @@
       return;
     }
 
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "q") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (state.composing) {
+        setTargetElement(el);
+        if (!flushPendingRoman(el)) return;
+        commitKatakana(el, true);
+      } else if (!state.wideAscii && !isAbbrevMode()) {
+        toggleKatakanaMode("han");
+      }
+      return;
+    }
+
     if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    if (e.key === "Tab" && !e.shiftKey && state.composing && !state.showingCandidate && !state.okuriKey && !isAbbrevMode()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      handleCompletion(el);
+      return;
+    }
 
     if (e.key === "Escape") {
       if (isAbbrevMode()) {
@@ -1903,6 +2124,48 @@
       return;
     }
 
+    if (candidateListActive(el)) {
+      const labelIndex = LIST_LABELS.indexOf(e.key.toLowerCase());
+      if (labelIndex !== -1) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setTargetElement(el);
+        const targetIndex = state.candidateIndex + labelIndex;
+        if (targetIndex < state.candidates.length) {
+          state.candidateIndex = targetIndex;
+          commitCandidate(el);
+        }
+        return;
+      }
+    }
+
+    if (state.composing && state.showingCandidate && e.key === "X") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      void purgeCurrentCandidate(el);
+      return;
+    }
+
+    if (e.key === ";" && !state.wideAscii) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      if (state.composing && state.showingCandidate) {
+        commitCandidate(el);
+        startComposition(el);
+        return;
+      }
+      if (state.composing) {
+        if (!state.okuriKey && preeditKana()) {
+          state.stickyOkuri = true;
+        }
+        return;
+      }
+      startComposition(el);
+      return;
+    }
+
     if (e.key === "l") {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -1927,6 +2190,54 @@
       e.stopImmediatePropagation();
       if (!flushPendingRoman(el)) return;
       commitKatakana(el);
+      return;
+    }
+
+    if (e.key === "q" && !state.composing) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toggleKatakanaMode("zen");
+      return;
+    }
+
+    if (state.composing && !state.showingCandidate && /^[0-9]$/.test(e.key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      if (!flushPendingRoman(el)) {
+        state.roman = "";
+      }
+      appendComposingKana(e.key);
+      showPreedit(el);
+      return;
+    }
+
+    if (e.key === ">" && state.composing) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      if (state.showingCandidate) {
+        commitCandidate(el);
+        startComposition(el);
+        appendComposingKana(">");
+        showPreedit(el);
+        return;
+      }
+      if (!flushPendingRoman(el)) return;
+      appendComposingKana(">");
+      void showNextCandidate(el);
+      return;
+    }
+
+    if (e.key === ">" && !state.composing) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      setTargetElement(el);
+      flushPendingRoman(el);
+      state.roman = "";
+      startComposition(el);
+      appendComposingKana(">");
+      showPreedit(el);
       return;
     }
 

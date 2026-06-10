@@ -201,3 +201,117 @@ runTest("backspace in the middle of composing preedit deletes matching kana", ()
   assert.equal(engine.composingPreedit(state), "▽もた");
   assert.equal(engine.composingOffsetAfterBackspace(3), 2);
 });
+
+runTest("editing the reading invalidates stale candidates", () => {
+  const state = createState();
+  state.kana = "てすと";
+  state.candidates = ["テスト", "TEST"];
+  state.candidateIndex = 1;
+  state.replacedLength = engine.composingPreedit(state).length;
+
+  const deleted = engine.deleteComposingCharBeforeOffset(state, 4);
+
+  assert.equal(deleted, true);
+  assert.equal(state.kana, "てす");
+  assert.deepEqual(state.candidates, []);
+  assert.equal(state.candidateIndex, 0);
+});
+
+runTest("appending kana invalidates stale candidates", () => {
+  const state = createState();
+  state.kana = "てす";
+  state.candidates = ["テスト", "TEST"];
+  state.candidateIndex = 1;
+
+  typeRoman(state, "ra");
+
+  assert.equal(state.kana, "てすら");
+  assert.deepEqual(state.candidates, []);
+  assert.equal(state.candidateIndex, 0);
+});
+
+runTest("failed okuri conversion folds okuri back into the stem", () => {
+  const state = createState();
+  state.kana = "ようきろく";
+  state.okuriKey = "g";
+  state.okuriKana = "がかり";
+
+  assert.equal(engine.lookupKey(state), "ようきろくg");
+
+  const folded = engine.foldOkuriIntoStem(state);
+
+  assert.equal(folded, true);
+  assert.equal(state.kana, "ようきろくがかり");
+  assert.equal(state.okuriKey, "");
+  assert.equal(state.okuriKana, "");
+  assert.equal(engine.lookupKey(state), "ようきろくがかり");
+  assert.equal(engine.composingPreedit(state), "▽ようきろくがかり");
+});
+
+runTest("fold is a no-op without okuri state", () => {
+  const state = createState();
+  state.kana = "ようきろく";
+
+  assert.equal(engine.foldOkuriIntoStem(state), false);
+  assert.equal(state.kana, "ようきろく");
+});
+
+runTest("okuri composition shows the * marker in preedit", () => {
+  const state = createState();
+  state.kana = "かんが";
+  state.okuriKey = "e";
+  state.okuriKana = "え";
+
+  assert.equal(engine.composingPreedit(state), "▽かんが*え");
+  assert.equal(engine.preeditKana(state), "かんがえ");
+  assert.equal(engine.lookupKey(state), "かんがe");
+});
+
+runTest("backspace on the okuri marker folds okuri into the stem", () => {
+  const state = createState();
+  state.kana = "かんが";
+  state.okuriKey = "e";
+  state.okuriKana = "え";
+  state.replacedLength = engine.composingPreedit(state).length;
+
+  // ▽かんが*え -> offset 5 is right after the marker... offset 5 targets the marker char itself
+  const deleted = engine.deleteComposingCharBeforeOffset(state, 5);
+
+  assert.equal(deleted, true);
+  assert.equal(state.kana, "かんがえ");
+  assert.equal(state.okuriKey, "");
+  assert.equal(state.okuriKana, "");
+  assert.equal(engine.composingPreedit(state), "▽かんがえ");
+});
+
+runTest("backspace on okuri kana after the marker deletes it", () => {
+  const state = createState();
+  state.kana = "かんが";
+  state.okuriKey = "e";
+  state.okuriKana = "え";
+  state.replacedLength = engine.composingPreedit(state).length;
+
+  const deleted = engine.deleteComposingCharBeforeOffset(state, 6);
+
+  assert.equal(deleted, true);
+  assert.equal(state.kana, "かんが");
+  assert.equal(state.okuriKana, "");
+  assert.equal(state.okuriKey, "e");
+});
+
+runTest("numeric candidates substitute number styles", () => {
+  assert.equal(engine.applyNumericCandidate("第#0回", ["5"]), "第5回");
+  assert.equal(engine.applyNumericCandidate("第#1回", ["5"]), "第５回");
+  assert.equal(engine.applyNumericCandidate("第#2回", ["25"]), "第二五回");
+  assert.equal(engine.applyNumericCandidate("第#3回", ["25"]), "第二十五回");
+  assert.equal(engine.applyNumericCandidate("#3円", ["1234"]), "千二百三十四円");
+  assert.equal(engine.applyNumericCandidate("#3", ["10405"]), "一万四百五");
+  assert.equal(engine.applyNumericCandidate("#3", ["0"]), "〇");
+  assert.equal(engine.applyNumericCandidate("#0月#0日", ["3", "14"]), "3月14日");
+});
+
+runTest("half-width katakana conversion handles voiced marks", () => {
+  assert.equal(engine.toHalfWidthKatakana("ガンダム"), "ｶﾞﾝﾀﾞﾑ");
+  assert.equal(engine.toHalfWidthKatakana("パーティー"), "ﾊﾟｰﾃｨｰ");
+  assert.equal(engine.toHalfWidthKatakana("ヴ、。"), "ｳﾞ､｡");
+});

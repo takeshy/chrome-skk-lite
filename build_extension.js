@@ -65,9 +65,10 @@ function parseDictionary(text, dict) {
 
     for (const entry of entries) {
       if (!entry) continue;
-      const candidate = entry.split(";")[0];
-      if (candidate && !bucket.includes(candidate)) {
-        bucket.push(candidate);
+      // Keep the annotation (";..." suffix); dedupe by the word before it.
+      const word = entry.split(";")[0];
+      if (word && !bucket.some((item) => item.split(";")[0] === word)) {
+        bucket.push(entry);
       }
     }
   }
