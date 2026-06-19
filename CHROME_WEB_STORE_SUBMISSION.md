@@ -40,6 +40,12 @@ Permission justification for `storage`:
 Stores user dictionary entries and candidate selection history locally in Chrome storage so conversion can be customized and frequently selected candidates can be prioritized. This data is not sent to external servers.
 ```
 
+Permission justification for `clipboardWrite`:
+
+```text
+Allows the shortcut-opened SKK clipboard input window to copy confirmed text to the clipboard so users can paste it into browser UI fields where content scripts cannot run, such as the address bar or New Tab search. Clipboard data is written only after the user presses Enter or the Copy button.
+```
+
 Permission / host access justification for all sites:
 
 ```text
@@ -78,6 +84,7 @@ Suggested screenshots:
 
 - A normal web page text area showing SKK kana mode and the mode badge.
 - Candidate conversion in progress.
+- Clipboard input window opened by Ctrl+Shift+K.
 - Options page showing local user dictionary editing.
 
 ## Test instructions for reviewer
@@ -88,6 +95,8 @@ Suggested screenshots:
 3. Focus the input field and press Ctrl+J to enable SKK kana mode.
 4. Type "Nihongo", press Space to convert, and press Enter or Ctrl+J to confirm.
 5. Confirm that the mode badge appears near the bottom-right of the page.
+6. Press Ctrl+Shift+K to open the clipboard input window.
+7. Type "Kanji", press Space, press Enter once to confirm the candidate, then press Enter again to copy and close the window.
 
 The extension intentionally does not run on Chrome internal pages, the Chrome Web Store, password fields, or unsupported input types.
 ```

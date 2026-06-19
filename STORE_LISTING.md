@@ -20,12 +20,14 @@ OSにIMEをインストールできない環境や、ブラウザ内だけで完
 - SKK標準の操作体系を再現（ローマ字入力、大文字での変換開始、送り仮名指定など）
 - 最新のSKK辞書（SKK-JISYO.Lなど）を内蔵し、高い変換精度を実現
 - ローカルストレージを使用したユーザー辞書登録機能
+- ショートカットで開けるクリップボード入力窓により、アドレスバーや新規タブ検索欄にも貼り付け可能
 - 外部サーバーへの入力データ送信なし（プライバシー重視）
 
 **使い方:**
 1. インストール後、任意のWebページを開きます。
 2. `Ctrl + J`（デフォルト）を押してSKKのかな入力にします。
 3. 画面右下に現在のモード（SKK かな / 変換など）が表示されます。
+4. アドレスバーなどで使いたい場合は `Ctrl + Shift + K` で入力窓を開き、コピー後に貼り付けます。
 
 **注意点:**
 - セキュリティ上の制限により、ブラウザの「新規タブ」ページや設定画面、Chromeウェブストア内では動作しません。
@@ -49,12 +51,14 @@ Ideal for environments where you cannot install an OS-level IME or prefer to kee
 - Faithful reproduction of SKK input patterns (Romanized input, uppercase to start conversion, okurigana handling).
 - Built-in high-quality SKK dictionaries for accurate conversion.
 - User dictionary support via local storage.
+- Clipboard input window for composing SKK text and pasting it into the address bar or New Tab search.
 - Privacy-focused: All processing happens locally; no input data is sent to external servers.
 
 **How to Use:**
 1. After installation, open any web page.
 2. Press `Ctrl + J` (default) to enter SKK Hiragana mode.
 3. The current mode (e.g., SKK Hiragana, Conversion) will appear in the bottom-right corner.
+4. Press `Ctrl + Shift + K` to open the clipboard input window when you want to paste SKK-composed text into the address bar or New Tab search.
 
 **Notes:**
 - Due to browser security restrictions, this extension does not work on "New Tab" pages, browser settings, or the Chrome Web Store itself.

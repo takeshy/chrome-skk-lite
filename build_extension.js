@@ -78,12 +78,21 @@ function ensureDirectory(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+function copyRuntimeFile(sourcePath, destinationPath) {
+  try {
+    fs.copyFileSync(sourcePath, destinationPath);
+  } catch (error) {
+    if (error.code !== "EPERM" && error.code !== "EACCES") throw error;
+    fs.writeFileSync(destinationPath, fs.readFileSync(sourcePath));
+  }
+}
+
 function copyRuntimeFiles(runtimeFiles, packageDir) {
   for (const relativePath of runtimeFiles) {
     const sourcePath = path.join(ROOT, relativePath);
     const destinationPath = path.join(packageDir, relativePath);
     ensureDirectory(path.dirname(destinationPath));
-    fs.copyFileSync(sourcePath, destinationPath);
+    copyRuntimeFile(sourcePath, destinationPath);
   }
 }
 

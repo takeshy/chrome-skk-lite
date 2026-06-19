@@ -1,8 +1,10 @@
 const COMPILED_DICTIONARY = "compiled/dictionary.json";
+const CLIPBOARD_INPUT_URL = "skk_clipboard.html";
 
 let dict = Object.create(null);
 let loadPromise = null;
 let entryCount = 0;
+let clipboardInputWindowId = null;
 
 async function loadDictionaries() {
   if (loadPromise) return loadPromise;
@@ -26,6 +28,31 @@ function warmupDictionaries() {
   void loadDictionaries().catch((e) => {
     console.error("Dictionary warmup failed:", e);
   });
+}
+
+async function openClipboardInputWindow() {
+  const url = chrome.runtime.getURL(CLIPBOARD_INPUT_URL);
+
+  if (clipboardInputWindowId != null) {
+    try {
+      const existing = await chrome.windows.get(clipboardInputWindowId);
+      if (existing) {
+        await chrome.windows.update(clipboardInputWindowId, { focused: true });
+        return;
+      }
+    } catch {
+      clipboardInputWindowId = null;
+    }
+  }
+
+  const created = await chrome.windows.create({
+    url,
+    type: "popup",
+    width: 560,
+    height: 260,
+    focused: true
+  });
+  clipboardInputWindowId = created?.id ?? null;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -55,6 +82,20 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(() => {
   warmupDictionaries();
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== "open-clipboard-input") return;
+  warmupDictionaries();
+  void openClipboardInputWindow().catch((e) => {
+    console.error("Failed to open SKK clipboard input:", e);
+  });
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === clipboardInputWindowId) {
+    clipboardInputWindowId = null;
+  }
 });
 
 warmupDictionaries();
