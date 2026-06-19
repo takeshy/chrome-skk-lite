@@ -33,9 +33,12 @@
   let userDict = {};
   let candidateHistory = {};
   const lookupCache = new Map();
+  let indicatorHost = null;
   let indicatorBadge = null;
   let indicatorMode = "";
   let indicatorText = "";
+  let indicatorPosition = null;
+  let indicatorDrag = null;
   let preeditPopup = null;
   let registerModal = null;
   let registerModalEls = null;
@@ -97,6 +100,19 @@
   function syncCandidateHistory(nextCandidateHistory) {
     candidateHistory = nextCandidateHistory || {};
     lookupCache.clear();
+  }
+
+  function validIndicatorPosition(position) {
+    if (!position || typeof position !== "object") return null;
+    const left = Number(position.left);
+    const top = Number(position.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { left, top };
+  }
+
+  function syncIndicatorPosition(nextPosition) {
+    indicatorPosition = validIndicatorPosition(nextPosition);
+    applyIndicatorPosition();
   }
 
   function isExtensionContextError(error) {
@@ -168,9 +184,10 @@
     });
   }
 
-  storageGet(["userDict", "candidateHistory"]).then(({ data }) => {
+  storageGet(["userDict", "candidateHistory", "indicatorPosition"]).then(({ data }) => {
     syncUserDict(data.userDict);
     syncCandidateHistory(data.candidateHistory);
+    syncIndicatorPosition(data.indicatorPosition);
   });
 
   try {
@@ -182,9 +199,90 @@
       if (changes.candidateHistory) {
         syncCandidateHistory(changes.candidateHistory.newValue);
       }
+      if (changes.indicatorPosition) {
+        syncIndicatorPosition(changes.indicatorPosition.newValue);
+      }
     });
   } catch (error) {
     logStorageUnavailable(error);
+  }
+
+  function clampIndicatorPosition(left, top) {
+    const host = indicatorHost;
+    const rect = host?.getBoundingClientRect?.();
+    const width = rect?.width || indicatorBadge?.offsetWidth || 72;
+    const height = rect?.height || indicatorBadge?.offsetHeight || 24;
+    return {
+      left: Math.max(8, Math.min(left, Math.max(8, window.innerWidth - width - 8))),
+      top: Math.max(8, Math.min(top, Math.max(8, window.innerHeight - height - 8)))
+    };
+  }
+
+  function applyIndicatorPosition() {
+    if (!indicatorHost) return;
+
+    if (!indicatorPosition) {
+      indicatorHost.style.left = "";
+      indicatorHost.style.top = "";
+      indicatorHost.style.right = "12px";
+      indicatorHost.style.bottom = "12px";
+      return;
+    }
+
+    const position = clampIndicatorPosition(indicatorPosition.left, indicatorPosition.top);
+    indicatorPosition = position;
+    indicatorHost.style.left = `${position.left}px`;
+    indicatorHost.style.top = `${position.top}px`;
+    indicatorHost.style.right = "";
+    indicatorHost.style.bottom = "";
+  }
+
+  function saveIndicatorPosition() {
+    if (!indicatorPosition) return;
+    void storageSet({ indicatorPosition });
+  }
+
+  function startIndicatorDrag(e) {
+    if (e.button !== 0) return;
+    const rect = indicatorHost?.getBoundingClientRect?.();
+    if (!rect) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    indicatorDrag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      left: rect.left,
+      top: rect.top
+    };
+    indicatorBadge?.setPointerCapture?.(e.pointerId);
+  }
+
+  function moveIndicatorDrag(e) {
+    if (!indicatorDrag || e.pointerId !== indicatorDrag.pointerId) return;
+
+    e.preventDefault();
+    const nextLeft = indicatorDrag.left + e.clientX - indicatorDrag.startX;
+    const nextTop = indicatorDrag.top + e.clientY - indicatorDrag.startY;
+    indicatorPosition = clampIndicatorPosition(nextLeft, nextTop);
+    applyIndicatorPosition();
+  }
+
+  function endIndicatorDrag(e) {
+    if (!indicatorDrag || e.pointerId !== indicatorDrag.pointerId) return;
+
+    e.preventDefault();
+    indicatorBadge?.releasePointerCapture?.(e.pointerId);
+    indicatorDrag = null;
+    saveIndicatorPosition();
+  }
+
+  function installIndicatorDragHandlers() {
+    indicatorBadge.addEventListener("pointerdown", startIndicatorDrag);
+    indicatorBadge.addEventListener("pointermove", moveIndicatorDrag);
+    indicatorBadge.addEventListener("pointerup", endIndicatorDrag);
+    indicatorBadge.addEventListener("pointercancel", endIndicatorDrag);
   }
 
   function ensureIndicator() {
@@ -194,13 +292,14 @@
     if (!parent) return null;
 
     const host = document.createElement("div");
+    indicatorHost = host;
     host.style.cssText = [
       "all: initial",
       "position: fixed",
       "right: 12px",
       "bottom: 12px",
       "z-index: 2147483647",
-      "pointer-events: none"
+      "pointer-events: auto"
     ].join(";");
 
     const shadow = host.attachShadow({ mode: "open" });
@@ -220,6 +319,8 @@
         text-align: center;
         white-space: nowrap;
         user-select: none;
+        cursor: move;
+        touch-action: none;
       }
       .badge[data-mode="off"] {
         background: rgba(72, 79, 91, 0.92);
@@ -246,8 +347,10 @@
 
     indicatorBadge = document.createElement("div");
     indicatorBadge.className = "badge";
+    installIndicatorDragHandlers();
     shadow.append(style, indicatorBadge);
     parent.appendChild(host);
+    applyIndicatorPosition();
     return indicatorBadge;
   }
 
@@ -337,7 +440,7 @@
       "all: initial",
       "position: fixed",
       "inset: 0",
-      "z-index: 2147483647",
+      "z-index: 2147483646",
       "pointer-events: none"
     ].join(";");
 
@@ -998,8 +1101,7 @@
     return (
       state.composing &&
       state.showingCandidate &&
-      state.candidateIndex >= INLINE_CANDIDATES &&
-      !shouldRenderPreeditInTarget(el)
+      state.candidateIndex >= INLINE_CANDIDATES
     );
   }
 
@@ -1059,15 +1161,16 @@
 
   function showCandidate(el) {
     const text = candidateText();
+    let displayText = text;
+    if (state.candidateIndex >= INLINE_CANDIDATES) {
+      displayText = candidateListText();
+    } else {
+      const raw = state.candidates[state.candidateIndex];
+      const annotation = raw ? candidateAnnotation(raw) : "";
+      if (annotation) displayText = `${text} ※${annotation}`;
+    }
+
     if (!shouldRenderPreeditInTarget(el)) {
-      let displayText = text;
-      if (state.candidateIndex >= INLINE_CANDIDATES) {
-        displayText = candidateListText();
-      } else {
-        const raw = state.candidates[state.candidateIndex];
-        const annotation = raw ? candidateAnnotation(raw) : "";
-        if (annotation) displayText = `${text} ※${annotation}`;
-      }
       showPreeditPopup(el, displayText, "candidate");
       state.replacedLength = text.length;
       state.showingCandidate = true;
@@ -1076,6 +1179,7 @@
       return;
     }
     replaceRendered(el, text);
+    showPreeditPopup(el, displayText, "candidate");
     state.replacedLength = text.length;
     state.showingCandidate = true;
     state.mode = engine.STATE.SKK_CANDIDATE;
