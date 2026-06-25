@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SKK Lite for Inputs",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "SKK-like Japanese input only inside Chrome page inputs.",
   "icons": {
     "16": "icons/icon16.png",
@@ -20,6 +20,13 @@
     "default_popup": "popup.html"
   },
   "commands": {
+    "toggle-skk-kana": {
+      "suggested_key": {
+        "default": "Ctrl+J",
+        "mac": "Ctrl+J"
+      },
+      "description": "Enable SKK kana mode or commit current conversion"
+    },
     "open-clipboard-input": {
       "suggested_key": {
         "default": "Ctrl+Shift+K",

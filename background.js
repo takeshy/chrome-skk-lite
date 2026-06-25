@@ -1,5 +1,7 @@
 const COMPILED_DICTIONARY = "compiled/dictionary.json";
 const CLIPBOARD_INPUT_URL = "skk_clipboard.html";
+const TOGGLE_SKK_COMMAND = "toggle-skk-kana";
+const OPEN_CLIPBOARD_INPUT_COMMAND = "open-clipboard-input";
 
 let dict = Object.create(null);
 let loadPromise = null;
@@ -55,6 +57,35 @@ async function openClipboardInputWindow() {
   clipboardInputWindowId = created?.id ?? null;
 }
 
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve) => {
+    if (tabId == null) {
+      resolve(false);
+      return;
+    }
+
+    chrome.tabs.sendMessage(tabId, message, () => {
+      if (chrome.runtime.lastError) {
+        console.debug("SKK command could not reach this tab:", chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+async function activateSkkInActiveTab(commandTab) {
+  warmupDictionaries();
+
+  if (await sendTabMessage(commandTab?.id, { type: "toggle", source: "command" })) {
+    return;
+  }
+
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  await sendTabMessage(activeTab?.id, { type: "toggle", source: "command" });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "warmup") {
     warmupDictionaries();
@@ -84,8 +115,15 @@ chrome.runtime.onStartup.addListener(() => {
   warmupDictionaries();
 });
 
-chrome.commands.onCommand.addListener((command) => {
-  if (command !== "open-clipboard-input") return;
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === TOGGLE_SKK_COMMAND) {
+    void activateSkkInActiveTab(tab).catch((e) => {
+      console.error("Failed to run SKK command:", e);
+    });
+    return;
+  }
+
+  if (command !== OPEN_CLIPBOARD_INPUT_COMMAND) return;
   warmupDictionaries();
   void openClipboardInputWindow().catch((e) => {
     console.error("Failed to open SKK clipboard input:", e);
