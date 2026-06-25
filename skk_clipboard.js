@@ -33,6 +33,8 @@
 
   const state = {
     text: "",
+    cursor: 0,
+    selectionEnd: 0,
     asciiMode: false,
     wideAscii: false,
     katakanaMode: null,
@@ -166,6 +168,45 @@
     return state.showingCandidate ? candidateText() : engine.composingPreedit(state);
   }
 
+  function clampTextIndex(index) {
+    const numeric = Number(index);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.max(0, Math.min(state.text.length, numeric));
+  }
+
+  function normalizedTextSelection() {
+    const start = clampTextIndex(state.cursor);
+    const end = clampTextIndex(state.selectionEnd);
+    return {
+      start: Math.min(start, end),
+      end: Math.max(start, end)
+    };
+  }
+
+  function syncSelectionFromInput() {
+    if (inputEl.selectionStart == null || inputEl.selectionEnd == null) return;
+
+    const preedit = currentPreeditText();
+    const preeditStart = clampTextIndex(state.cursor);
+    const preeditEnd = preeditStart + preedit.length;
+    const mapDisplayIndex = (index) => {
+      const pos = Math.max(0, Number(index) || 0);
+      if (!preedit.length || pos <= preeditStart) return clampTextIndex(pos);
+      if (pos >= preeditEnd) return clampTextIndex(pos - preedit.length);
+      return preeditStart;
+    };
+
+    state.cursor = mapDisplayIndex(inputEl.selectionStart);
+    state.selectionEnd = mapDisplayIndex(inputEl.selectionEnd);
+  }
+
+  function replaceSelectedText(text) {
+    const selection = normalizedTextSelection();
+    state.text = state.text.slice(0, selection.start) + text + state.text.slice(selection.end);
+    state.cursor = selection.start + text.length;
+    state.selectionEnd = state.cursor;
+  }
+
   function renderCandidateHint() {
     if (!state.composing || !state.showingCandidate) {
       candidateEl.textContent = "";
@@ -219,8 +260,11 @@
   }
 
   function render() {
-    inputEl.value = state.text + currentPreeditText();
-    inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+    const selection = normalizedTextSelection();
+    const preedit = currentPreeditText();
+    inputEl.value = state.text.slice(0, selection.start) + preedit + state.text.slice(selection.end);
+    const cursor = selection.start + preedit.length;
+    inputEl.selectionStart = inputEl.selectionEnd = cursor;
     updateMode();
     renderCandidateHint();
   }
@@ -254,7 +298,7 @@
       commitCandidate();
     } else if (state.composing || state.roman) {
       if (!flushPendingRoman() && state.roman) {
-        state.text += state.roman;
+        replaceSelectedText(state.roman);
         state.roman = "";
       }
       if (state.composing) {
@@ -273,7 +317,7 @@
       commitCandidate();
     } else if (state.composing || state.roman) {
       if (!flushPendingRoman() && state.roman) {
-        state.text += state.roman;
+        replaceSelectedText(state.roman);
         state.roman = "";
       }
       if (state.composing) {
@@ -288,7 +332,7 @@
   }
 
   function appendText(text) {
-    state.text += text;
+    replaceSelectedText(text);
     render();
   }
 
@@ -298,7 +342,7 @@
     const rawCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
     const selectedCandidate = rawCandidate ? candidateWord(rawCandidate) : "";
     const text = state.showingCandidate ? candidateText() : preeditKana();
-    state.text += text;
+    replaceSelectedText(text);
     if (selectedCandidate) {
       rememberCandidateSelection(committedKey, selectedCandidate);
     }
@@ -308,7 +352,7 @@
 
   function commitRawPreedit() {
     if (!state.composing) return;
-    state.text += preeditKana();
+    replaceSelectedText(preeditKana());
     resetComposition();
     render();
   }
@@ -316,7 +360,7 @@
   function commitKatakana(half = false) {
     if (!state.composing || !preeditKana()) return false;
     const katakana = toKatakana(preeditKana());
-    state.text += half ? engine.toHalfWidthKatakana(katakana) : katakana;
+    replaceSelectedText(half ? engine.toHalfWidthKatakana(katakana) : katakana);
     resetComposition();
     render();
     return true;
@@ -346,7 +390,7 @@
   }
 
   function closeAbbrev(replacement) {
-    state.text += replacement;
+    replaceSelectedText(replacement);
     resetComposition();
     render();
   }
@@ -623,7 +667,7 @@
     const kana = engine.consumeRomanChunk(state);
     if (!kana) return false;
     if (!state.composing) {
-      state.text += applyKatakanaMode(kana);
+      replaceSelectedText(applyKatakanaMode(kana));
     }
     render();
     if (state.composing && state.okuriKey && state.okuriKana && !state.roman && !state.candidates.length) {
@@ -643,7 +687,7 @@
       if (state.roman === "n") {
         const kana = engine.consumePendingN(state);
         if (!state.composing) {
-          state.text += applyKatakanaMode(kana);
+          replaceSelectedText(applyKatakanaMode(kana));
         }
         render();
         return true;
@@ -832,6 +876,8 @@
   }
 
   function handleBackspace(e) {
+    syncSelectionFromInput();
+
     if (isAbbrevMode()) {
       e.preventDefault();
       if (state.abbrev) {
@@ -843,7 +889,8 @@
       return true;
     }
 
-    if (!state.roman && !state.composing && !state.text) return false;
+    const selection = normalizedTextSelection();
+    if (!state.roman && !state.composing && selection.start === selection.end && selection.start === 0) return false;
 
     e.preventDefault();
     if (state.roman) {
@@ -874,7 +921,13 @@
       return true;
     }
 
-    state.text = state.text.slice(0, -1);
+    if (selection.start !== selection.end) {
+      replaceSelectedText("");
+    } else {
+      state.text = state.text.slice(0, selection.start - 1) + state.text.slice(selection.start);
+      state.cursor = selection.start - 1;
+      state.selectionEnd = state.cursor;
+    }
     render();
     return true;
   }
@@ -903,6 +956,8 @@
   }
 
   inputEl.addEventListener("keydown", (e) => {
+    syncSelectionFromInput();
+
     if (isToggleKeyEvent(e)) {
       e.preventDefault();
       e.stopImmediatePropagation();

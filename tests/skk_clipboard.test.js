@@ -118,6 +118,7 @@ async function resetWindow() {
   await press("Escape");
   let guard = 0;
   while (input.value && guard++ < 100) {
+    input.selectionStart = input.selectionEnd = input.value.length;
     await press("Backspace");
   }
   copiedText = "";
@@ -146,6 +147,22 @@ async function runTest(name, fn) {
       await press(ch);
     }
     assert.equal(input.value, " ?!@:<");
+  });
+
+  await runTest("kana input preserves moved caret in the clipboard window", async () => {
+    await type("aiu");
+    input.selectionStart = input.selectionEnd = 1;
+    await type("ka");
+    assert.equal(input.value, "あかいう");
+    assert.equal(input.selectionStart, 2);
+  });
+
+  await runTest("kana input replaces the selected range in the clipboard window", async () => {
+    await type("aiu");
+    input.selectionStart = 1;
+    input.selectionEnd = 2;
+    await type("ka");
+    assert.equal(input.value, "あかう");
   });
 
   await runTest("okuri conversion auto-selects after okuri kana", async () => {
