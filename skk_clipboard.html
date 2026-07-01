@@ -42,6 +42,12 @@
       font-size: 12px;
       font-weight: 700;
       white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .mode:hover {
+      background: #0f6fad;
     }
 
     textarea {
@@ -149,7 +155,7 @@
 <body>
   <header>
     <h1>SKK Clipboard Input</h1>
-    <div id="mode" class="mode">SKK かな</div>
+    <div id="mode" class="mode" role="button" tabindex="0" title="クリックで SKK かな / SKK OFF を切り替え">SKK かな</div>
   </header>
   <textarea id="input" autocomplete="off" spellcheck="false" autofocus></textarea>
   <div id="candidate" class="candidate" data-active="false"></div>

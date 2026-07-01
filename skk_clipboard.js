@@ -1149,6 +1149,26 @@
     e.preventDefault();
   });
 
+  function toggleSkkMode() {
+    if (state.asciiMode || state.wideAscii) {
+      enterKanaMode();
+    } else {
+      enterAsciiMode();
+    }
+    inputEl.focus();
+  }
+
+  modeEl.addEventListener("click", () => {
+    toggleSkkMode();
+  });
+
+  modeEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggleSkkMode();
+    }
+  });
+
   copyButton.addEventListener("click", () => {
     void copyAndClose();
   });
