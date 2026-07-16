@@ -76,6 +76,25 @@ function sendTabMessage(tabId, message) {
 }
 
 async function activateSkkInActiveTab(commandTab) {
+  // Chrome consumes registered extension shortcuts before the extension page can
+  // receive a keydown event. Route Ctrl+J back to the clipboard input window
+  // when that window has focus.
+  const isClipboardInput =
+    commandTab?.windowId === clipboardInputWindowId ||
+    commandTab?.url === chrome.runtime.getURL(CLIPBOARD_INPUT_URL);
+  if (isClipboardInput) {
+    try {
+      const maybePromise = chrome.runtime.sendMessage({
+        type: "clipboard-toggle-skk",
+        source: "command"
+      });
+      if (maybePromise?.catch) maybePromise.catch(() => {});
+    } catch (e) {
+      console.debug("SKK command could not reach the clipboard input window:", e);
+    }
+    return;
+  }
+
   warmupDictionaries();
 
   if (await sendTabMessage(commandTab?.id, { type: "toggle", source: "command" })) {

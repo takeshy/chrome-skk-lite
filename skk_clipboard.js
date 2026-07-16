@@ -164,8 +164,9 @@
 
   function currentPreeditText() {
     if (isAbbrevMode()) return engine.abbrevPreedit(state);
-    if (!state.composing) return "";
-    return state.showingCandidate ? candidateText() : engine.composingPreedit(state);
+    if (!state.composing) return state.roman;
+    if (state.showingCandidate) return candidateText();
+    return engine.composingPreedit(state) + state.roman;
   }
 
   function clampTextIndex(index) {
@@ -189,6 +190,16 @@
     const preedit = currentPreeditText();
     const preeditStart = clampTextIndex(state.cursor);
     const preeditEnd = preeditStart + preedit.length;
+    if (
+      preedit.length &&
+      inputEl.selectionStart === preeditEnd &&
+      inputEl.selectionEnd === preeditEnd
+    ) {
+      // render() collapses the visual selection after the temporary preedit.
+      // Keep the underlying committed-text selection until the preedit is
+      // converted, so typing "ka" still replaces the originally selected text.
+      return;
+    }
     const mapDisplayIndex = (index) => {
       const pos = Math.max(0, Number(index) || 0);
       if (!preedit.length || pos <= preeditStart) return clampTextIndex(pos);
@@ -209,8 +220,8 @@
 
   function renderCandidateHint() {
     if (!state.composing || !state.showingCandidate) {
-      candidateEl.textContent = "";
-      candidateEl.dataset.active = "false";
+      if (candidateEl.textContent) candidateEl.textContent = "";
+      if (candidateEl.dataset.active !== "false") candidateEl.dataset.active = "false";
       return;
     }
 
@@ -223,48 +234,73 @@
       if (annotation) text = `${text} ※${annotation}`;
     }
 
-    candidateEl.textContent = text;
-    candidateEl.dataset.active = "true";
+    if (candidateEl.textContent !== text) candidateEl.textContent = text;
+    if (candidateEl.dataset.active !== "true") candidateEl.dataset.active = "true";
   }
 
   function updateMode() {
+    let text;
     if (state.wideAscii) {
-      modeEl.textContent = "SKK 全英";
+      text = "SKK 全英";
+    } else if (state.asciiMode) {
+      text = "SKK OFF";
+    } else if (isAbbrevMode()) {
+      text = "SKK 略語";
+    } else if (state.composing && state.showingCandidate) {
+      text = "SKK 候補";
+    } else if (state.composing) {
+      text = "SKK 変換";
+    } else if (state.katakanaMode === "han") {
+      text = "SKK 半ｶﾅ";
+    } else if (state.katakanaMode === "zen") {
+      text = "SKK カナ";
+    } else {
+      text = "SKK かな";
+    }
+    if (modeEl.textContent !== text) modeEl.textContent = text;
+  }
+
+  function updateInputValue(value) {
+    const previous = inputEl.value;
+    if (previous === value) return;
+
+    // Replacing textarea.value on every keystroke makes Chromium reshape and
+    // repaint the entire text. Keep the unchanged prefix/suffix in the DOM and
+    // replace only the edited range instead.
+    if (typeof inputEl.setRangeText !== "function") {
+      inputEl.value = value;
       return;
     }
-    if (state.asciiMode) {
-      modeEl.textContent = "SKK OFF";
-      return;
+
+    let start = 0;
+    const sharedLength = Math.min(previous.length, value.length);
+    while (start < sharedLength && previous.charCodeAt(start) === value.charCodeAt(start)) {
+      start += 1;
     }
-    if (isAbbrevMode()) {
-      modeEl.textContent = "SKK 略語";
-      return;
+
+    let previousEnd = previous.length;
+    let nextEnd = value.length;
+    while (
+      previousEnd > start &&
+      nextEnd > start &&
+      previous.charCodeAt(previousEnd - 1) === value.charCodeAt(nextEnd - 1)
+    ) {
+      previousEnd -= 1;
+      nextEnd -= 1;
     }
-    if (state.composing && state.showingCandidate) {
-      modeEl.textContent = "SKK 候補";
-      return;
-    }
-    if (state.composing) {
-      modeEl.textContent = "SKK 変換";
-      return;
-    }
-    if (state.katakanaMode === "han") {
-      modeEl.textContent = "SKK 半ｶﾅ";
-      return;
-    }
-    if (state.katakanaMode === "zen") {
-      modeEl.textContent = "SKK カナ";
-      return;
-    }
-    modeEl.textContent = "SKK かな";
+
+    inputEl.setRangeText(value.slice(start, nextEnd), start, previousEnd, "preserve");
   }
 
   function render() {
     const selection = normalizedTextSelection();
     const preedit = currentPreeditText();
-    inputEl.value = state.text.slice(0, selection.start) + preedit + state.text.slice(selection.end);
+    const value = state.text.slice(0, selection.start) + preedit + state.text.slice(selection.end);
     const cursor = selection.start + preedit.length;
-    inputEl.selectionStart = inputEl.selectionEnd = cursor;
+    updateInputValue(value);
+    if (inputEl.selectionStart !== cursor || inputEl.selectionEnd !== cursor) {
+      inputEl.selectionStart = inputEl.selectionEnd = cursor;
+    }
     updateMode();
     renderCandidateHint();
   }
@@ -799,6 +835,9 @@
       if (state.roman !== beforeRoman) continue;
       break;
     }
+    // A consonant may still be waiting for the following vowel. Render that
+    // pending roman text immediately so every keypress has visual feedback.
+    if (state.roman) render();
     return true;
   }
 
@@ -1157,6 +1196,19 @@
     }
     inputEl.focus();
   }
+
+  chrome.runtime?.onMessage?.addListener((message) => {
+    if (message?.type !== "clipboard-toggle-skk") return false;
+
+    if (state.asciiMode || state.wideAscii) {
+      enterKanaMode();
+    } else {
+      if (state.roman && !flushPendingRoman()) return false;
+      if (state.composing) commitCandidate();
+    }
+    inputEl.focus();
+    return false;
+  });
 
   modeEl.addEventListener("click", () => {
     toggleSkkMode();

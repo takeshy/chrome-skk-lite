@@ -16,6 +16,7 @@ class FakeElement {
     this.listeners = {};
     this.selectionStart = 0;
     this.selectionEnd = 0;
+    this.rangeTextUpdates = 0;
   }
 
   addEventListener(type, listener) {
@@ -23,6 +24,11 @@ class FakeElement {
   }
 
   focus() {}
+
+  setRangeText(text, start, end) {
+    this.value = this.value.slice(0, start) + text + this.value.slice(end);
+    this.rangeTextUpdates += 1;
+  }
 }
 
 const elements = {
@@ -36,6 +42,7 @@ const elements = {
 
 let copiedText = "";
 let closed = false;
+let runtimeMessageListener = null;
 
 globalThis.document = {
   getElementById(id) {
@@ -60,6 +67,11 @@ globalThis.navigator = {
 globalThis.chrome = {
   runtime: {
     lastError: null,
+    onMessage: {
+      addListener(listener) {
+        runtimeMessageListener = listener;
+      }
+    },
     sendMessage(message, callback) {
       if (message?.type === "lookup") {
         queueMicrotask(() => callback?.({ candidates: DICT[message.kana] || [] }));
@@ -149,12 +161,28 @@ async function runTest(name, fn) {
     assert.equal(input.value, " ?!@:<");
   });
 
+  await runTest("pending roman text is visible until it becomes kana", async () => {
+    await press("k");
+    assert.equal(input.value, "k");
+    await press("a");
+    assert.equal(input.value, "か");
+  });
+
+  await runTest("pending roman text is visible during composition", async () => {
+    await press("K", { shift: true });
+    assert.equal(input.value, "▽k");
+    await press("a");
+    assert.equal(input.value, "▽か");
+  });
+
   await runTest("kana input preserves moved caret in the clipboard window", async () => {
+    const updatesBefore = input.rangeTextUpdates;
     await type("aiu");
     input.selectionStart = input.selectionEnd = 1;
     await type("ka");
     assert.equal(input.value, "あかいう");
     assert.equal(input.selectionStart, 2);
+    assert.ok(input.rangeTextUpdates > updatesBefore);
   });
 
   await runTest("kana input replaces the selected range in the clipboard window", async () => {
@@ -182,6 +210,13 @@ async function runTest(name, fn) {
     await press(" ");
     await press("g", { ctrl: true, keyCode: 71 });
     assert.equal(input.value, "▽かんじ");
+  });
+
+  await runTest("Chrome Ctrl+J command commits conversion in the clipboard window", async () => {
+    await type("Kanji");
+    await press(" ");
+    runtimeMessageListener({ type: "clipboard-toggle-skk", source: "command" });
+    assert.equal(input.value, "感じ");
   });
 
   await runTest("Shift+Enter inserts newline", async () => {
