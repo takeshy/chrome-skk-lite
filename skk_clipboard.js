@@ -1083,6 +1083,8 @@
       return;
     }
 
+    if (handleZCommand(e)) return;
+
     if (e.key === " " && isAbbrevMode()) {
       e.preventDefault();
       void showAbbrevCandidates();
@@ -1175,8 +1177,6 @@
     }
 
     if (handlePrefixSuffixConversion(e)) return;
-
-    if (handleZCommand(e)) return;
 
     if (handlePrintable(e)) return;
 

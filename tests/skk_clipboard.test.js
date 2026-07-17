@@ -232,10 +232,10 @@ async function runTest(name, fn) {
   });
 
   await runTest("z commands insert symbols", async () => {
-    await type("zh");
+    await type("zhzjzkzl");
     await press("z");
     await press(" ");
-    assert.equal(input.value, "←　");
+    assert.equal(input.value, "←↓↑→　");
   });
 
   await press("Enter");
