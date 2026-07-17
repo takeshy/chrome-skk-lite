@@ -988,7 +988,7 @@
     try {
       await navigator.clipboard.writeText(text);
       statusEl.textContent = "Copied.";
-      setTimeout(() => window.close(), 350);
+      setTimeout(() => window.close(), 100);
     } catch {
       statusEl.textContent = "Copy failed.";
     }
