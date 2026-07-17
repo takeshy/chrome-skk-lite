@@ -1183,6 +1183,33 @@
     if (handleLiteralAscii(e)) return;
   }, true);
 
+  inputEl.addEventListener("paste", (e) => {
+    e.preventDefault();
+    syncSelectionFromInput();
+
+    const pastedText = e.clipboardData?.getData("text/plain") ?? "";
+
+    if (isAbbrevMode()) {
+      closeAbbrev(state.abbrev);
+    }
+
+    if (state.roman && !flushPendingRoman()) {
+      const pendingRoman = state.roman;
+      state.roman = "";
+      if (state.composing) {
+        appendComposingKana(pendingRoman);
+      } else {
+        replaceSelectedText(pendingRoman);
+      }
+    }
+    if (state.composing) {
+      commitCandidate();
+    }
+
+    replaceSelectedText(pastedText);
+    render();
+  });
+
   inputEl.addEventListener("beforeinput", (e) => {
     if (e.inputType !== "insertText") return;
     e.preventDefault();

@@ -96,6 +96,7 @@ require("../skk_clipboard.js");
 
 const input = elements.input;
 const keydown = input.listeners.keydown;
+const paste = input.listeners.paste;
 
 function flush() {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -124,6 +125,22 @@ async function type(text) {
   for (const ch of text) {
     await press(ch, { shift: ch >= "A" && ch <= "Z" });
   }
+}
+
+function pasteText(text) {
+  const event = {
+    defaultPrevented: false,
+    clipboardData: {
+      getData(type) {
+        return type === "text/plain" ? text : "";
+      }
+    },
+    preventDefault() {
+      this.defaultPrevented = true;
+    }
+  };
+  paste(event);
+  return event;
 }
 
 async function resetWindow() {
@@ -191,6 +208,26 @@ async function runTest(name, fn) {
     input.selectionEnd = 2;
     await type("ka");
     assert.equal(input.value, "あかう");
+  });
+
+  await runTest("pasted text remains when backspace and kana input follow", async () => {
+    const event = pasteText("貼り付け");
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(input.value, "貼り付け");
+
+    await press("Backspace");
+    assert.equal(input.value, "貼り付");
+
+    await type("ka");
+    assert.equal(input.value, "貼り付か");
+  });
+
+  await runTest("paste replaces the selected range", async () => {
+    pasteText("abcdef");
+    input.selectionStart = 2;
+    input.selectionEnd = 4;
+    pasteText("XY");
+    assert.equal(input.value, "abXYef");
   });
 
   await runTest("okuri conversion auto-selects after okuri kana", async () => {
