@@ -64,6 +64,7 @@
     modalOpen: false,
     modalContext: null,
     replacedLength: 0,
+    pendingRomanRendered: false,
     renderStart: null,
     renderEnd: null,
     renderRange: null,
@@ -746,8 +747,7 @@
       if (state.composing || state.roman) {
         focusTargetElement();
         if (!flushPendingRoman(el) && state.roman) {
-          insertText(el, state.roman);
-          state.roman = "";
+          commitPendingRomanLiteral(el);
         }
         if (state.composing) {
           commitRawPreeditText(el);
@@ -1127,7 +1127,7 @@
   function currentPreeditDisplayText() {
     if (isAbbrevMode()) return abbrevPreedit();
     if (!state.composing) return "";
-    return state.showingCandidate ? candidateText() : composingPreedit();
+    return state.showingCandidate ? candidateText() : composingPreedit() + state.roman;
   }
 
   function commitRawPreeditText(el) {
@@ -1143,7 +1143,7 @@
 
   function showPreedit(el, caretOffset) {
     if (!state.composing) return;
-    const text = composingPreedit();
+    const text = composingPreedit() + state.roman;
     if (!shouldRenderPreeditInTarget(el)) {
       showPreeditPopup(el, text, "compose");
       state.replacedLength = text.length;
@@ -1263,6 +1263,7 @@
     state.completionMatches = null;
     state.completionIndex = 0;
     state.replacedLength = 0;
+    state.pendingRomanRendered = false;
     clearRenderedRange();
     hidePreeditPopup();
     state.targetElement = null;
@@ -1281,6 +1282,7 @@
       candidateIndex: state.candidateIndex,
       showingCandidate: state.showingCandidate,
       replacedLength: state.replacedLength,
+      pendingRomanRendered: state.pendingRomanRendered,
       renderStart: state.renderStart,
       renderEnd: state.renderEnd,
       renderRange: state.renderRange ? state.renderRange.cloneRange() : null,
@@ -1302,6 +1304,7 @@
     state.candidateIndex = snapshot.candidateIndex;
     state.showingCandidate = snapshot.showingCandidate;
     state.replacedLength = snapshot.replacedLength;
+    state.pendingRomanRendered = !!snapshot.pendingRomanRendered;
     state.renderStart = snapshot.renderStart ?? null;
     state.renderEnd = snapshot.renderEnd ?? null;
     state.renderRange = snapshot.renderRange ? snapshot.renderRange.cloneRange() : null;
@@ -1545,8 +1548,7 @@
       commitCandidate(el);
     } else if (state.composing || state.roman) {
       if (!flushPendingRoman(el) && state.roman) {
-        insertText(el, state.roman);
-        state.roman = "";
+        commitPendingRomanLiteral(el);
       }
       if (state.composing) {
         commitRawPreeditText(el);
@@ -1568,8 +1570,7 @@
       commitCandidate(el);
     } else if (state.composing || state.roman) {
       if (!flushPendingRoman(el) && state.roman) {
-        insertText(el, state.roman);
-        state.roman = "";
+        commitPendingRomanLiteral(el);
       }
       if (state.composing) {
         commitRawPreeditText(el);
@@ -1930,6 +1931,11 @@
     if (!kana) return false;
     if (state.composing && !shouldRenderPreeditInTarget(el)) {
       showPreedit(el);
+    } else if (!state.composing && state.pendingRomanRendered) {
+      replaceRendered(el, applyKatakanaMode(kana));
+      state.pendingRomanRendered = false;
+      state.replacedLength = 0;
+      clearRenderedRange();
     } else {
       const trackRange = state.composing || isAbbrevMode();
       insertText(el, applyKatakanaMode(kana), { trackRange });
@@ -1955,6 +1961,11 @@
         const kana = engine.consumePendingN(state);
         if (state.composing && !shouldRenderPreeditInTarget(el)) {
           showPreedit(el);
+        } else if (!state.composing && state.pendingRomanRendered) {
+          replaceRendered(el, applyKatakanaMode(kana));
+          state.pendingRomanRendered = false;
+          state.replacedLength = 0;
+          clearRenderedRange();
         } else {
           const trackRange = state.composing || isAbbrevMode();
           insertText(el, applyKatakanaMode(kana), { trackRange });
@@ -1967,6 +1978,48 @@
       break;
     }
     return !state.roman;
+  }
+
+  function renderPendingRoman(el) {
+    if (state.composing) {
+      showPreedit(el);
+      return;
+    }
+
+    if (!state.pendingRomanRendered) {
+      if (!state.roman) return;
+      insertText(el, state.roman, { trackRange: true });
+      setRenderedRangeFromCaret(el, state.roman.length);
+      state.pendingRomanRendered = true;
+    } else {
+      replaceRendered(el, state.roman);
+    }
+
+    state.replacedLength = state.roman.length;
+    if (!state.roman) {
+      state.pendingRomanRendered = false;
+      clearRenderedRange();
+    }
+  }
+
+  function commitPendingRomanLiteral(el) {
+    if (!state.roman) return;
+    if (state.pendingRomanRendered) {
+      state.pendingRomanRendered = false;
+      state.replacedLength = 0;
+      clearRenderedRange();
+    } else {
+      insertText(el, state.roman);
+    }
+    state.roman = "";
+  }
+
+  function cancelPendingRoman(el) {
+    if (!state.pendingRomanRendered) return;
+    replaceRendered(el, "");
+    state.pendingRomanRendered = false;
+    state.replacedLength = 0;
+    clearRenderedRange();
   }
 
   function handlePrintable(el, e) {
@@ -2007,6 +2060,7 @@
       if (state.roman !== beforeRoman) continue;
       break;
     }
+    if (state.roman) renderPendingRoman(el);
     return true;
   }
 
@@ -2018,6 +2072,7 @@
 
     if (state.roman) {
       state.roman = state.roman.slice(0, -1);
+      renderPendingRoman(el);
       return true;
     }
 
@@ -2175,6 +2230,8 @@
         e.stopImmediatePropagation();
         if (state.composing) {
           commitRawPreeditText(el);
+        } else {
+          cancelPendingRoman(el);
         }
         clearCompositionState();
         updateIndicator();
@@ -2185,6 +2242,8 @@
         e.stopImmediatePropagation();
         if (state.composing) {
           commitRawPreeditText(el);
+        } else {
+          cancelPendingRoman(el);
         }
         reset();
       }

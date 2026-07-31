@@ -195,6 +195,36 @@ async function runTest(name, fn) {
     assert.equal(input.value, "あいう");
   });
 
+  await runTest("pending consonant is visible until it becomes kana", async () => {
+    await enableSkk();
+    await press("k");
+    assert.equal(input.value, "k");
+    await press("a");
+    assert.equal(input.value, "か");
+  });
+
+  await runTest("backspace removes a visible pending consonant", async () => {
+    await enableSkk();
+    await press("k");
+    await press("Backspace");
+    assert.equal(input.value, "");
+  });
+
+  await runTest("pending n is replaced when kana input ends", async () => {
+    await enableSkk();
+    await press("n");
+    assert.equal(input.value, "n");
+    await press("l");
+    assert.equal(input.value, "ん");
+  });
+
+  await runTest("escape removes a visible pending consonant", async () => {
+    await enableSkk();
+    await press("k");
+    await press("Escape");
+    assert.equal(input.value, "");
+  });
+
   await runTest("conversion commits via Enter", async () => {
     await enableSkk();
     await type("Kanji");
@@ -286,8 +316,7 @@ async function runTest(name, fn) {
   await runTest("digits type literally outside composition", async () => {
     await enableSkk();
     await type("a5b");
-    // 'b' stays pending as roman; only あ5 visible
-    assert.equal(input.value, "あ5");
+    assert.equal(input.value, "あ5b");
   });
 })().catch((error) => {
   console.error(error);
