@@ -118,6 +118,97 @@
       color: #fff;
     }
 
+    .register-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, 0.42);
+    }
+
+    .register-overlay[data-open="true"] {
+      display: flex;
+    }
+
+    .register-dialog {
+      box-sizing: border-box;
+      width: min(420px, 100%);
+      border: 1px solid #c6d0dd;
+      border-radius: 10px;
+      padding: 16px;
+      background: #fff;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.3);
+    }
+
+    .register-dialog h2 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    .register-dialog p {
+      margin: 0 0 12px;
+      font-size: 13px;
+    }
+
+    .register-reading {
+      font-family: ui-monospace, monospace;
+      font-weight: 700;
+    }
+
+    .register-mode {
+      display: inline-block;
+      margin-left: 6px;
+      border-radius: 4px;
+      padding: 1px 5px;
+      background: #146fab;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      vertical-align: 1px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .register-mode:focus-visible {
+      outline: 2px solid #0f6fad;
+      outline-offset: 2px;
+    }
+
+    .register-input {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid #c6d0dd;
+      border-radius: 6px;
+      padding: 7px 9px;
+      background: #fff;
+      color: #172033;
+      font: 16px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .register-error {
+      min-height: 18px;
+      margin: 7px 0 8px !important;
+      color: #b91c1c;
+      font-size: 12px !important;
+    }
+
+    .register-candidate {
+      min-height: 20px;
+      margin: 7px 0 0;
+      color: #166534;
+      font-size: 12px;
+    }
+
+    .register-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
     @media (prefers-color-scheme: dark) {
       body {
         color: #e8edf5;
@@ -125,7 +216,9 @@
       }
 
       textarea,
-      button {
+      button,
+      .register-dialog,
+      .register-input {
         border-color: #344155;
         background: #172033;
         color: #e8edf5;
@@ -136,6 +229,10 @@
       }
 
       .candidate {
+        color: #86efac;
+      }
+
+      .register-candidate {
         color: #86efac;
       }
 
@@ -164,6 +261,19 @@
     <div class="actions">
       <button id="copy" class="primary" type="button">Copy</button>
       <button id="close" type="button">Close</button>
+    </div>
+  </div>
+  <div id="register-overlay" class="register-overlay" data-open="false">
+    <div class="register-dialog" role="dialog" aria-modal="true" aria-labelledby="register-title">
+      <h2 id="register-title">単語登録</h2>
+      <p><span id="register-reading" class="register-reading"></span> に登録する単語を入力してください。<span id="register-mode" class="register-mode" role="button" tabindex="0" title="クリックで SKK かな / SKK OFF を切り替え">SKK かな</span></p>
+      <input id="register-input" class="register-input" type="text" autocomplete="off" spellcheck="false" placeholder="登録する単語">
+      <div id="register-candidate" class="register-candidate" aria-live="polite"></div>
+      <p id="register-error" class="register-error" aria-live="polite"></p>
+      <div class="register-actions">
+        <button id="register-cancel" type="button">閉じる</button>
+        <button id="register-save" class="primary" type="button">登録</button>
+      </div>
     </div>
   </div>
   <script src="skk_engine.js"></script>

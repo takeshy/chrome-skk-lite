@@ -8,6 +8,14 @@
   const statusEl = document.getElementById("status");
   const copyButton = document.getElementById("copy");
   const closeButton = document.getElementById("close");
+  const registerOverlay = document.getElementById("register-overlay");
+  const registerReadingEl = document.getElementById("register-reading");
+  const registerModeEl = document.getElementById("register-mode");
+  const registerInputEl = document.getElementById("register-input");
+  const registerCandidateEl = document.getElementById("register-candidate");
+  const registerErrorEl = document.getElementById("register-error");
+  const registerSaveButton = document.getElementById("register-save");
+  const registerCancelButton = document.getElementById("register-cancel");
 
   const INLINE_CANDIDATES = 4;
   const LIST_PAGE_SIZE = 7;
@@ -29,7 +37,26 @@
 
   let userDict = {};
   let candidateHistory = {};
+  let registerKey = "";
   const lookupCache = new Map();
+
+  const registerState = {
+    text: "",
+    cursor: 0,
+    selectionEnd: 0,
+    asciiMode: false,
+    wideAscii: false,
+    katakanaMode: null,
+    roman: "",
+    composing: false,
+    kana: "",
+    okuriKey: "",
+    okuriKana: "",
+    candidates: [],
+    candidateIndex: 0,
+    showingCandidate: false,
+    replacedLength: 0
+  };
 
   const state = {
     text: "",
@@ -301,6 +328,9 @@
     if (inputEl.selectionStart !== cursor || inputEl.selectionEnd !== cursor) {
       inputEl.selectionStart = inputEl.selectionEnd = cursor;
     }
+    if (cursor === value.length) {
+      inputEl.scrollTop = inputEl.scrollHeight;
+    }
     updateMode();
     renderCandidateHint();
   }
@@ -509,6 +539,326 @@
     void storageSet({ candidateHistory: nextCandidateHistory });
   }
 
+  function resetRegisterComposition() {
+    registerState.roman = "";
+    registerState.composing = false;
+    registerState.kana = "";
+    registerState.okuriKey = "";
+    registerState.okuriKana = "";
+    registerState.candidates = [];
+    registerState.candidateIndex = 0;
+    registerState.showingCandidate = false;
+    registerState.replacedLength = 0;
+  }
+
+  function registerPreeditText() {
+    if (!registerState.composing) return registerState.roman;
+    if (registerState.showingCandidate) {
+      const raw = registerState.candidates[registerState.candidateIndex] || "";
+      return candidateWord(raw) + registerState.okuriKana;
+    }
+    return engine.composingPreedit(registerState) + registerState.roman;
+  }
+
+  function updateRegisterMode() {
+    let text = "SKK かな";
+    if (registerState.wideAscii) {
+      text = "SKK 全英";
+    } else if (registerState.asciiMode) {
+      text = "SKK OFF";
+    } else if (registerState.showingCandidate) {
+      text = "SKK 候補";
+    } else if (registerState.composing) {
+      text = "SKK 変換";
+    } else if (registerState.katakanaMode === "han") {
+      text = "SKK 半ｶﾅ";
+    } else if (registerState.katakanaMode === "zen") {
+      text = "SKK カナ";
+    }
+    registerModeEl.textContent = text;
+  }
+
+  function renderRegisterInput() {
+    const start = Math.max(0, Math.min(registerState.text.length, registerState.cursor));
+    const end = Math.max(start, Math.min(registerState.text.length, registerState.selectionEnd));
+    const preedit = registerPreeditText();
+    registerInputEl.value =
+      registerState.text.slice(0, start) + preedit + registerState.text.slice(end);
+    const caret = start + preedit.length;
+    registerInputEl.selectionStart = registerInputEl.selectionEnd = caret;
+
+    if (registerState.showingCandidate) {
+      const raw = registerState.candidates[registerState.candidateIndex] || "";
+      const annotation = candidateAnnotation(raw);
+      registerCandidateEl.textContent = annotation
+        ? `${candidateWord(raw)} ※${annotation}`
+        : candidateWord(raw);
+    } else {
+      registerCandidateEl.textContent = "";
+    }
+    updateRegisterMode();
+  }
+
+  function replaceRegisterSelection(text) {
+    const start = Math.max(0, Math.min(registerState.text.length, registerState.cursor));
+    const end = Math.max(start, Math.min(registerState.text.length, registerState.selectionEnd));
+    registerState.text = registerState.text.slice(0, start) + text + registerState.text.slice(end);
+    registerState.cursor = start + text.length;
+    registerState.selectionEnd = registerState.cursor;
+  }
+
+  function syncRegisterSelection() {
+    if (registerPreeditText()) return;
+    registerState.text = registerInputEl.value;
+    registerState.cursor = registerInputEl.selectionStart ?? registerState.text.length;
+    registerState.selectionEnd = registerInputEl.selectionEnd ?? registerState.cursor;
+  }
+
+  function startRegisterComposition() {
+    resetRegisterComposition();
+    registerState.composing = true;
+    renderRegisterInput();
+  }
+
+  function enterRegisterKanaMode() {
+    registerState.asciiMode = false;
+    registerState.wideAscii = false;
+    registerState.katakanaMode = null;
+    renderRegisterInput();
+  }
+
+  function enterRegisterAsciiMode(wide = false) {
+    if (registerState.roman && !flushRegisterRoman()) return;
+    if (registerState.composing) commitRegisterComposition();
+    registerState.asciiMode = !wide;
+    registerState.wideAscii = wide;
+    renderRegisterInput();
+  }
+
+  function handleRegisterToggleCommand() {
+    if (registerState.asciiMode || registerState.wideAscii) {
+      enterRegisterKanaMode();
+    } else {
+      if (registerState.roman && !flushRegisterRoman()) return;
+      if (registerState.composing) commitRegisterComposition();
+    }
+    registerInputEl.focus();
+  }
+
+  function toggleRegisterModeFromLabel() {
+    syncRegisterSelection();
+    if (registerState.asciiMode || registerState.wideAscii) {
+      enterRegisterKanaMode();
+    } else {
+      enterRegisterAsciiMode(false);
+    }
+    registerInputEl.focus();
+  }
+
+  function convertRegisterRomanChunk() {
+    const kana = engine.consumeRomanChunk(registerState);
+    if (!kana) return false;
+    if (!registerState.composing) {
+      const katakana = registerState.katakanaMode ? toKatakana(kana) : kana;
+      replaceRegisterSelection(
+        registerState.katakanaMode === "han"
+          ? engine.toHalfWidthKatakana(katakana)
+          : katakana
+      );
+    }
+    renderRegisterInput();
+    return true;
+  }
+
+  function flushRegisterRoman() {
+    let guard = 0;
+    while (registerState.roman && guard++ < 8) {
+      const before = registerState.roman;
+      if (convertRegisterRomanChunk()) continue;
+      if (registerState.roman !== before) continue;
+      if (registerState.roman === "n") {
+        const kana = engine.consumePendingN(registerState);
+        if (!registerState.composing) {
+          const katakana = registerState.katakanaMode ? toKatakana(kana) : kana;
+          replaceRegisterSelection(
+            registerState.katakanaMode === "han"
+              ? engine.toHalfWidthKatakana(katakana)
+              : katakana
+          );
+        }
+        renderRegisterInput();
+        return true;
+      }
+      break;
+    }
+    return !registerState.roman;
+  }
+
+  function commitRegisterComposition() {
+    if (!registerState.composing) return;
+    const raw = registerState.showingCandidate
+      ? registerState.candidates[registerState.candidateIndex]
+      : "";
+    const text = raw
+      ? candidateWord(raw) + registerState.okuriKana
+      : engine.preeditKana(registerState);
+    replaceRegisterSelection(text);
+    resetRegisterComposition();
+    registerErrorEl.textContent = "";
+    renderRegisterInput();
+  }
+
+  function commitRegisterKatakana(half = false) {
+    if (!registerState.composing || !engine.preeditKana(registerState)) return false;
+    const katakana = toKatakana(engine.preeditKana(registerState));
+    replaceRegisterSelection(half ? engine.toHalfWidthKatakana(katakana) : katakana);
+    resetRegisterComposition();
+    registerErrorEl.textContent = "";
+    renderRegisterInput();
+    return true;
+  }
+
+  function toggleRegisterKatakanaMode(kind) {
+    registerState.katakanaMode = registerState.katakanaMode === kind ? null : kind;
+    renderRegisterInput();
+  }
+
+  async function showNextRegisterCandidate() {
+    if (!registerState.composing || !flushRegisterRoman()) return;
+    const key = engine.lookupKey(registerState);
+    if (!key) return;
+
+    if (!registerState.candidates.length) {
+      registerState.candidates = await lookup(key);
+      registerState.candidateIndex = 0;
+      if (!registerState.candidates.length) {
+        registerErrorEl.textContent = "候補がありません。変換バッファは維持されます。";
+        renderRegisterInput();
+        return;
+      }
+      registerState.showingCandidate = true;
+      registerErrorEl.textContent = "";
+      renderRegisterInput();
+      return;
+    }
+
+    if (!registerState.showingCandidate) {
+      registerState.candidateIndex = 0;
+      registerState.showingCandidate = true;
+    } else if (registerState.candidateIndex < registerState.candidates.length - 1) {
+      registerState.candidateIndex += 1;
+    } else {
+      registerErrorEl.textContent = "これ以上候補がありません。";
+    }
+    renderRegisterInput();
+  }
+
+  function handleRegisterPrintable(e) {
+    if (!isHandledPrintableKey(e.key)) return false;
+    e.preventDefault();
+
+    if (registerState.showingCandidate) commitRegisterComposition();
+    if (isUpperAsciiLetter(e.key) && !registerState.composing) {
+      startRegisterComposition();
+    } else if (engine.shouldStartOkuri(registerState, e.key)) {
+      registerState.okuriKey = e.key.toLowerCase();
+      registerState.okuriKana = "";
+      registerState.candidates = [];
+      registerState.showingCandidate = false;
+    }
+
+    if (/^[0-9]$/.test(e.key) && !registerState.composing) {
+      replaceRegisterSelection(e.key);
+      renderRegisterInput();
+      return true;
+    }
+
+    registerState.roman += e.key.toLowerCase();
+    let guard = 0;
+    while (registerState.roman && guard++ < 4) {
+      const before = registerState.roman;
+      if (convertRegisterRomanChunk()) continue;
+      if (registerState.roman !== before) continue;
+      break;
+    }
+    renderRegisterInput();
+    return true;
+  }
+
+  function openRegisterModal() {
+    registerKey = lookupKey() || preeditKana();
+    if (!registerKey) return;
+
+    registerReadingEl.textContent = registerKey;
+    registerState.text = "";
+    registerState.cursor = 0;
+    registerState.selectionEnd = 0;
+    registerState.asciiMode = false;
+    registerState.wideAscii = false;
+    registerState.katakanaMode = null;
+    resetRegisterComposition();
+    registerInputEl.value = "";
+    registerCandidateEl.textContent = "";
+    updateRegisterMode();
+    registerErrorEl.textContent = "";
+    registerOverlay.dataset.open = "true";
+    statusEl.textContent = "Register a new candidate.";
+    queueMicrotask(() => {
+      registerInputEl.focus();
+      registerInputEl.select();
+    });
+  }
+
+  function closeRegisterModal() {
+    registerOverlay.dataset.open = "false";
+    registerErrorEl.textContent = "";
+    registerCandidateEl.textContent = "";
+    resetRegisterComposition();
+    registerKey = "";
+    inputEl.focus();
+  }
+
+  async function saveRegisterWord() {
+    if (registerState.roman && !flushRegisterRoman()) {
+      registerErrorEl.textContent = "未確定のローマ字があります。";
+      return;
+    }
+    if (registerState.composing) commitRegisterComposition();
+    syncRegisterSelection();
+    const value = registerState.text.trim();
+    if (!value) {
+      registerErrorEl.textContent = "登録する単語を入力してください。";
+      return;
+    }
+    if (!registerKey) {
+      registerErrorEl.textContent = "読みが空のため登録できません。";
+      return;
+    }
+
+    const data = await storageGet(["userDict"]);
+    const nextUserDict = { ...(data.userDict || {}) };
+    const existing = Array.isArray(nextUserDict[registerKey]) ? nextUserDict[registerKey] : [];
+    nextUserDict[registerKey] = [
+      value,
+      ...existing.filter((candidate) => candidateWord(candidate) !== value)
+    ];
+    if (!(await storageSet({ userDict: nextUserDict }))) {
+      registerErrorEl.textContent = "辞書を保存できませんでした。";
+      return;
+    }
+
+    syncUserDict(nextUserDict);
+    state.candidates = [
+      value,
+      ...state.candidates.filter((candidate) => candidateWord(candidate) !== value)
+    ];
+    state.candidateIndex = 0;
+    state.showingCandidate = true;
+    closeRegisterModal();
+    commitCandidate();
+    statusEl.textContent = "Registered.";
+  }
+
   async function showNextCandidate() {
     if (!state.composing) return;
     if (!flushPendingRoman()) return;
@@ -518,7 +868,7 @@
       state.candidateIndex = 0;
       if (!state.candidates.length) {
         showPreedit();
-        statusEl.textContent = "No candidates.";
+        openRegisterModal();
         return;
       }
       statusEl.textContent = "Space: next / Enter: commit / x: previous";
@@ -537,7 +887,7 @@
       ? nextIndex >= state.candidates.length
       : state.candidateIndex >= state.candidates.length - 1;
     if (exhausted) {
-      statusEl.textContent = "No more candidates.";
+      openRegisterModal();
       return;
     }
 
@@ -587,8 +937,8 @@
     state.composing = true;
 
     if (!state.candidates.length) {
-      statusEl.textContent = "No candidates.";
       showPreedit();
+      openRegisterModal();
       return;
     }
 
@@ -1227,6 +1577,11 @@
   chrome.runtime?.onMessage?.addListener((message) => {
     if (message?.type !== "clipboard-toggle-skk") return false;
 
+    if (registerOverlay.dataset.open === "true") {
+      handleRegisterToggleCommand();
+      return false;
+    }
+
     if (state.asciiMode || state.wideAscii) {
       enterKanaMode();
     } else {
@@ -1254,6 +1609,151 @@
 
   closeButton.addEventListener("click", () => {
     window.close();
+  });
+
+  registerSaveButton.addEventListener("click", () => {
+    void saveRegisterWord();
+  });
+
+  registerCancelButton.addEventListener("click", () => {
+    closeRegisterModal();
+  });
+
+  registerOverlay.addEventListener("click", (e) => {
+    if (e.target === registerOverlay) closeRegisterModal();
+  });
+
+  registerModeEl.addEventListener("click", () => {
+    toggleRegisterModeFromLabel();
+  });
+
+  registerModeEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggleRegisterModeFromLabel();
+    }
+  });
+
+  registerInputEl.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    syncRegisterSelection();
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeRegisterModal();
+      return;
+    }
+
+    if (isToggleKeyEvent(e)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      handleRegisterToggleCommand();
+      return;
+    }
+
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "q") {
+      e.preventDefault();
+      if (registerState.composing) {
+        if (!flushRegisterRoman()) return;
+        commitRegisterKatakana(true);
+      } else {
+        toggleRegisterKatakanaMode("han");
+      }
+      return;
+    }
+
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    if ((registerState.asciiMode || registerState.wideAscii) && ASCII_PRINTABLE_RE.test(e.key)) {
+      e.preventDefault();
+      replaceRegisterSelection(registerState.wideAscii ? toFullWidthAscii(e.key) : e.key);
+      renderRegisterInput();
+      return;
+    }
+
+    if (e.key === "l" && !registerState.composing && !registerState.roman) {
+      e.preventDefault();
+      enterRegisterAsciiMode(false);
+      return;
+    }
+
+    if (e.key === "L" && !registerState.composing && !registerState.roman) {
+      e.preventDefault();
+      enterRegisterAsciiMode(true);
+      return;
+    }
+
+    if (e.key.toLowerCase() === "q" && registerState.composing) {
+      e.preventDefault();
+      if (!flushRegisterRoman()) return;
+      commitRegisterKatakana(false);
+      return;
+    }
+
+    if (e.key === "q" && !registerState.composing) {
+      e.preventDefault();
+      toggleRegisterKatakanaMode("zen");
+      return;
+    }
+
+    if (e.key === " " && registerState.composing) {
+      e.preventDefault();
+      void showNextRegisterCandidate();
+      return;
+    }
+
+    if (e.key.toLowerCase() === "x" && registerState.showingCandidate) {
+      e.preventDefault();
+      if (registerState.candidateIndex > 0) {
+        registerState.candidateIndex -= 1;
+      } else {
+        registerState.showingCandidate = false;
+      }
+      registerErrorEl.textContent = "";
+      renderRegisterInput();
+      return;
+    }
+
+    if (e.key === "Backspace" && (registerState.roman || registerState.composing)) {
+      e.preventDefault();
+      if (registerState.roman) {
+        registerState.roman = registerState.roman.slice(0, -1);
+      } else if (registerState.showingCandidate) {
+        registerState.showingCandidate = false;
+      } else if (registerState.okuriKana) {
+        registerState.okuriKana = registerState.okuriKana.slice(0, -1);
+      } else if (registerState.okuriKey) {
+        registerState.okuriKey = "";
+      } else if (registerState.kana) {
+        registerState.kana = registerState.kana.slice(0, -1);
+      }
+      if (
+        registerState.composing &&
+        !registerState.roman &&
+        !engine.preeditKana(registerState)
+      ) {
+        resetRegisterComposition();
+      }
+      renderRegisterInput();
+      return;
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (registerState.roman && !flushRegisterRoman()) return;
+      if (registerState.composing) {
+        commitRegisterComposition();
+        return;
+      }
+      void saveRegisterWord();
+      return;
+    }
+
+    handleRegisterPrintable(e);
+  });
+
+  registerInputEl.addEventListener("input", () => {
+    if (!registerPreeditText()) syncRegisterSelection();
   });
 
   chrome.storage?.onChanged?.addListener((changes, areaName) => {
