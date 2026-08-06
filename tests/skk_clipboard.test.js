@@ -261,6 +261,21 @@ async function runTest(name, fn) {
     assert.ok(input.rangeTextUpdates > updatesBefore);
   });
 
+  await runTest("mode changes preserve a caret moved to the end", async () => {
+    await type("aiu");
+    input.selectionStart = input.selectionEnd = input.value.length - 1;
+    input.listeners.select();
+    input.selectionStart = input.selectionEnd = input.value.length;
+    input.listeners.select();
+
+    elements.mode.listeners.click();
+    await press("z");
+
+    assert.equal(input.value, "あいうz");
+    assert.equal(input.selectionStart, input.value.length);
+    elements.mode.listeners.click();
+  });
+
   await runTest("kana input replaces the selected range in the clipboard window", async () => {
     await type("aiu");
     input.selectionStart = 1;

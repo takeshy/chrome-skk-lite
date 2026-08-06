@@ -1565,7 +1565,17 @@
     e.preventDefault();
   });
 
+  // Native caret movement (arrow keys, Home/End, or a mouse click) happens
+  // after keydown. Keep the committed-text cursor in sync at the time the
+  // textarea selection actually changes. Otherwise a render triggered by the
+  // mode button or an extension command can restore the previous position and
+  // make text appear immediately before the last character.
+  inputEl.addEventListener("select", () => {
+    syncSelectionFromInput();
+  });
+
   function toggleSkkMode() {
+    syncSelectionFromInput();
     if (state.asciiMode || state.wideAscii) {
       enterKanaMode();
     } else {
@@ -1582,6 +1592,7 @@
       return false;
     }
 
+    syncSelectionFromInput();
     if (state.asciiMode || state.wideAscii) {
       enterKanaMode();
     } else {
