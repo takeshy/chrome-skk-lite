@@ -391,6 +391,16 @@ async function runTest(name, fn) {
     elements["register-cancel"].listeners.click();
   });
 
+  await runTest("Ctrl+G cancels the registration window", async () => {
+    await type("MikakuteiCtrlG");
+    await press(" ");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+
+    const event = await pressRegister("g", { ctrl: true });
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(elements["register-overlay"].dataset.open, "false");
+  });
+
   await runTest("the registration field supports wide ascii input", async () => {
     await type("Mikakutei3");
     await press(" ");

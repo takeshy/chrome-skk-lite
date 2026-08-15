@@ -7,6 +7,7 @@ let dict = Object.create(null);
 let loadPromise = null;
 let entryCount = 0;
 let clipboardInputWindowId = null;
+let clipboardInputWindowPromise = null;
 
 async function loadDictionaries() {
   if (loadPromise) return loadPromise;
@@ -32,7 +33,7 @@ function warmupDictionaries() {
   });
 }
 
-async function openClipboardInputWindow() {
+async function createOrFocusClipboardInputWindow() {
   const url = chrome.runtime.getURL(CLIPBOARD_INPUT_URL);
 
   if (clipboardInputWindowId != null) {
@@ -55,6 +56,18 @@ async function openClipboardInputWindow() {
     focused: true
   });
   clipboardInputWindowId = created?.id ?? null;
+}
+
+function openClipboardInputWindow() {
+  // Commands can arrive again while chrome.windows.create/get is still pending.
+  // Share that operation so rapid Ctrl+Shift+K presses cannot create one popup
+  // per command.
+  if (clipboardInputWindowPromise) return clipboardInputWindowPromise;
+
+  clipboardInputWindowPromise = createOrFocusClipboardInputWindow().finally(() => {
+    clipboardInputWindowPromise = null;
+  });
+  return clipboardInputWindowPromise;
 }
 
 function sendTabMessage(tabId, message) {

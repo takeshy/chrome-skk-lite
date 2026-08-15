@@ -486,6 +486,23 @@
         font-family: ui-monospace, monospace;
         font-weight: 700;
       }
+      .mode {
+        display: inline-block;
+        margin-left: 6px;
+        border-radius: 4px;
+        padding: 1px 5px;
+        background: #0f766e;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        vertical-align: 1px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .mode:focus-visible {
+        outline: 2px solid #0f766e;
+        outline-offset: 2px;
+      }
       .input {
         box-sizing: border-box;
         width: 100%;
@@ -534,7 +551,7 @@
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="skk-lite-register-title">
         <div class="body">
           <h2 class="title" id="skk-lite-register-title">単語登録</h2>
-          <p class="desc"><span class="reading"></span> に登録する単語を入力してください。</p>
+          <p class="desc"><span class="reading"></span> に登録する単語を入力してください。<span class="mode" role="button" tabindex="0" title="クリックで SKK かな / SKK OFF を切り替え">SKK かな</span></p>
           <input class="input" type="text" autocomplete="off" spellcheck="false" placeholder="登録する単語">
           <p class="error" aria-live="polite"></p>
         </div>
@@ -552,6 +569,7 @@
     registerModalEls = {
       host,
       reading: overlay.querySelector(".reading"),
+      mode: overlay.querySelector(".mode"),
       input: overlay.querySelector(".input"),
       error: overlay.querySelector(".error"),
       saveButton: overlay.querySelector('[data-action="save"]'),
@@ -564,6 +582,20 @@
     registerModalEls.cancelButton.addEventListener("click", () => {
       closeRegisterModal(true);
     });
+    const toggleRegisterMode = () => {
+      if (state.enabled) {
+        enterAsciiMode(registerModalEls.input);
+      } else {
+        handleRegisterToggle(registerModalEls.input);
+      }
+      registerModalEls.input.focus();
+    };
+    registerModalEls.mode.addEventListener("click", toggleRegisterMode);
+    registerModalEls.mode.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      toggleRegisterMode();
+    });
     registerModal.addEventListener("click", (e) => {
       if (e.target === registerModal) {
         closeRegisterModal(true);
@@ -571,6 +603,12 @@
     });
     registerModalEls.input.addEventListener("keydown", (e) => {
       if (e.defaultPrevented) return;
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeRegisterModal(true);
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         closeRegisterModal(true);
@@ -613,6 +651,9 @@
     if (!badge) return;
 
     const { mode, text } = getIndicatorMode();
+    if (registerModalEls?.mode && registerModalEls.mode.textContent !== text) {
+      registerModalEls.mode.textContent = text;
+    }
     if (indicatorMode === mode && indicatorText === text) return;
     indicatorMode = mode;
     indicatorText = text;
@@ -763,6 +804,22 @@
     return currentStatus();
   }
 
+  function handleRegisterToggle(el) {
+    if (!state.enabled) {
+      state.enabled = true;
+      state.wideAscii = false;
+      clearCompositionState();
+      state.mode = engine.STATE.SKK_KANA;
+      setTargetElement(el);
+      updateIndicator();
+      sendRuntimeMessage({ type: "warmup" });
+      return;
+    }
+    if (state.composing) {
+      commitCandidate(el);
+    }
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "get-state") {
       sendResponse(currentStatus());
@@ -777,6 +834,10 @@
     if (message.type !== "activate" && message.type !== "toggle") return false;
 
     if (state.modalOpen) {
+      const el = getDeepActiveElement(document);
+      if (isRegisterInputElement(el)) {
+        handleRegisterToggle(el);
+      }
       sendResponse(currentStatus());
       return false;
     }
@@ -1929,7 +1990,7 @@
   function convertRomanChunk(el) {
     const kana = engine.consumeRomanChunk(state);
     if (!kana) return false;
-    if (state.composing && !shouldRenderPreeditInTarget(el)) {
+    if (state.composing) {
       showPreedit(el);
     } else if (!state.composing && state.pendingRomanRendered) {
       replaceRendered(el, applyKatakanaMode(kana));
@@ -1959,7 +2020,7 @@
       if (state.roman !== beforeRoman) continue;
       if (state.roman === "n") {
         const kana = engine.consumePendingN(state);
-        if (state.composing && !shouldRenderPreeditInTarget(el)) {
+        if (state.composing) {
           showPreedit(el);
         } else if (!state.composing && state.pendingRomanRendered) {
           replaceRendered(el, applyKatakanaMode(kana));
@@ -2149,9 +2210,7 @@
       if (state.modalOpen && isRegisterInput) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (state.composing) {
-          commitCandidate(el);
-        }
+        handleRegisterToggle(el);
         return;
       }
       if (state.enabled && state.composing && !isRegisterInput) {
