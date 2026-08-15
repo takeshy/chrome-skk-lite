@@ -1649,6 +1649,13 @@
     if (e.isComposing) return;
     syncRegisterSelection();
 
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "g") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeRegisterModal();
+      return;
+    }
+
     if (e.key === "Escape") {
       e.preventDefault();
       closeRegisterModal();
