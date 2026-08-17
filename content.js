@@ -393,6 +393,13 @@
         border-color: rgba(22, 101, 52, 0.36);
         background: rgba(240, 253, 244, 0.98);
       }
+      .preedit[data-mode="inline"] {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+      }
     `;
 
     preeditPopup = document.createElement("div");
@@ -407,9 +414,29 @@
     const popup = ensurePreeditPopup();
     if (!popup || !el?.getBoundingClientRect) return;
 
-    const rect = el.getBoundingClientRect();
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 24));
-    const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 40));
+    const selectionRange = el.isContentEditable ? contentEditableSelectionRange(el) : null;
+    const caretRect = selectionRange?.collapsed
+      ? selectionRange.getClientRects?.()[0] || selectionRange.getBoundingClientRect?.()
+      : null;
+    const rect = caretRect && (caretRect.width || caretRect.height)
+      ? caretRect
+      : el.getBoundingClientRect();
+    const inlineAtCaret = popup.dataset.mode === "inline" && rect === caretRect;
+    const popupWidth = popup.offsetWidth || 24;
+    const popupHeight = popup.offsetHeight || 40;
+    const left = inlineAtCaret
+      ? Math.max(0, Math.min(rect.left, window.innerWidth - popupWidth))
+      : Math.max(8, Math.min(rect.left, window.innerWidth - popupWidth - 8));
+    if (inlineAtCaret) {
+      popup.getRootNode().host.style.left = `${left}px`;
+      popup.getRootNode().host.style.top = `${Math.max(0, rect.top)}px`;
+      return;
+    }
+    const below = rect.bottom + 4;
+    const above = rect.top - popupHeight - 4;
+    const top = below + popupHeight <= window.innerHeight - 8
+      ? below
+      : Math.max(8, above);
     popup.getRootNode().host.style.left = `${left}px`;
     popup.getRootNode().host.style.top = `${top}px`;
   }
@@ -419,6 +446,16 @@
     if (!popup) return;
     popup.textContent = text;
     popup.dataset.mode = mode;
+    if (mode === "inline" && typeof getComputedStyle === "function") {
+      const computed = getComputedStyle(el);
+      popup.style.font = computed.font;
+      popup.style.lineHeight = computed.lineHeight;
+      popup.style.color = computed.color;
+    } else {
+      popup.style.font = "";
+      popup.style.lineHeight = "";
+      popup.style.color = "";
+    }
     popup.style.display = text ? "block" : "none";
     if (text) positionPreeditPopup(el);
   }
@@ -921,6 +958,10 @@
   }
 
   function replacePrevious(el, count, text) {
+    if (el.isContentEditable && selectPreviousContentEditableText(el, count)) {
+      insertText(el, text, { trackRange: true });
+      return;
+    }
     deleteBackward(el, count);
     insertText(el, text);
   }
@@ -939,6 +980,31 @@
     if (!sel) return false;
     sel.removeAllRanges();
     sel.addRange(range.cloneRange());
+    return true;
+  }
+
+  function selectPreviousContentEditableText(el, count) {
+    if (count <= 0) return false;
+    const sel = document.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed || typeof sel.modify !== "function") return false;
+
+    const original = sel.getRangeAt(0).cloneRange();
+    if (!el.contains(original.startContainer) || !el.contains(original.endContainer)) return false;
+
+    for (let i = 0; i < count; i++) {
+      sel.modify("extend", "backward", "character");
+    }
+
+    const selected = sel.rangeCount ? sel.getRangeAt(0) : null;
+    if (
+      !selected ||
+      selected.collapsed ||
+      !el.contains(selected.startContainer) ||
+      !el.contains(selected.endContainer)
+    ) {
+      selectContentEditableRange(el, original);
+      return false;
+    }
     return true;
   }
 
@@ -1000,7 +1066,8 @@
       return (
         !!state.renderRange &&
         el.contains(state.renderRange.startContainer) &&
-        el.contains(state.renderRange.endContainer)
+        el.contains(state.renderRange.endContainer) &&
+        state.renderRange.toString().length === currentRenderedLength()
       );
     }
     return (
@@ -1808,7 +1875,12 @@
     }
 
     if (!candidates.length) {
-      engine.foldOkuriIntoStem(state);
+      state.mode = engine.STATE.SKK_TOUROKU;
+      if (state.modalOpen && isRegisterInputElement(el)) {
+        showPreedit(el);
+      } else {
+        openRegisterModal();
+      }
       return;
     }
 
@@ -1841,10 +1913,6 @@
       state.candidateIndex = 0;
       state.replacedLength = composingPreedit().length;
       if (!state.candidates.length) {
-        if (engine.foldOkuriIntoStem(state)) {
-          void showNextCandidate(el);
-          return;
-        }
         if (state.modalOpen && isRegisterInputElement(el)) {
           showPreedit(el);
         } else {
@@ -2000,6 +2068,7 @@
     } else {
       const trackRange = state.composing || isAbbrevMode();
       insertText(el, applyKatakanaMode(kana), { trackRange });
+      if (el.isContentEditable) hidePreeditPopup();
       if (state.composing || isAbbrevMode()) {
         setRenderedRangeFromCaret(el, state.replacedLength);
       }
@@ -2030,6 +2099,7 @@
         } else {
           const trackRange = state.composing || isAbbrevMode();
           insertText(el, applyKatakanaMode(kana), { trackRange });
+          if (el.isContentEditable) hidePreeditPopup();
           if (state.composing || isAbbrevMode()) {
             setRenderedRangeFromCaret(el, state.replacedLength);
           }
@@ -2044,6 +2114,18 @@
   function renderPendingRoman(el) {
     if (state.composing) {
       showPreedit(el);
+      return;
+    }
+
+    if (el.isContentEditable) {
+      if (state.roman) {
+        showPreeditPopup(el, state.roman, "inline");
+      } else {
+        hidePreeditPopup();
+      }
+      state.pendingRomanRendered = false;
+      state.replacedLength = 0;
+      clearRenderedRange();
       return;
     }
 
@@ -2065,6 +2147,7 @@
 
   function commitPendingRomanLiteral(el) {
     if (!state.roman) return;
+    if (el.isContentEditable) hidePreeditPopup();
     if (state.pendingRomanRendered) {
       state.pendingRomanRendered = false;
       state.replacedLength = 0;

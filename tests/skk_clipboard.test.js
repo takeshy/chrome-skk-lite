@@ -309,6 +309,21 @@ async function runTest(name, fn) {
     assert.equal(input.value, "持ち");
   });
 
+  await runTest("missing okuri candidates open registration", async () => {
+    await type("YoutuumoTi");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+    assert.equal(elements["register-reading"].textContent, "ようつうもt");
+
+    elements["register-input"].value = "腰痛持";
+    elements["register-save"].listeners.click();
+    await flush();
+    await flush();
+
+    assert.equal(elements["register-overlay"].dataset.open, "false");
+    assert.equal(input.value, "腰痛持ち");
+    assert.deepEqual(storedData.userDict["ようつうもt"], ["腰痛持"]);
+  });
+
   await runTest("new text after candidate commits current candidate first", async () => {
     await type("Kanji");
     await press(" ");
@@ -392,7 +407,7 @@ async function runTest(name, fn) {
   });
 
   await runTest("Ctrl+G cancels the registration window", async () => {
-    await type("MikakuteiCtrlG");
+    await type("Mikakuteikyanseru");
     await press(" ");
     assert.equal(elements["register-overlay"].dataset.open, "true");
 

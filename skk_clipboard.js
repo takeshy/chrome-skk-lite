@@ -912,8 +912,8 @@
     }
 
     if (!candidates.length) {
-      engine.foldOkuriIntoStem(state);
-      render();
+      showPreedit();
+      openRegisterModal();
       return;
     }
 

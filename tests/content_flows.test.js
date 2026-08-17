@@ -318,6 +318,112 @@ async function runTest(name, fn) {
     await type("a5b");
     assert.equal(input.value, "あ5b");
   });
+
+  await runTest("contenteditable keeps its caret by inserting only completed kana", async () => {
+    class FakeRange {
+      constructor(node, start, end = start) {
+        this.startContainer = node;
+        this.endContainer = node;
+        this.startOffset = start;
+        this.endOffset = end;
+      }
+      get collapsed() {
+        return this.startContainer === this.endContainer && this.startOffset === this.endOffset;
+      }
+      cloneRange() {
+        return new FakeRange(this.startContainer, this.startOffset, this.endOffset);
+      }
+      setStart(node, offset) {
+        this.startContainer = node;
+        this.startOffset = offset;
+      }
+      setEnd(node, offset) {
+        this.endContainer = node;
+        this.endOffset = offset;
+      }
+      toString() {
+        return this.startContainer.text.slice(this.startOffset, this.endOffset);
+      }
+    }
+
+    const editable = {
+      tagName: "DIV",
+      isContentEditable: true,
+      isConnected: true,
+      text: "",
+      node: null,
+      contains(node) {
+        return node === this.node && node.isConnected;
+      },
+      focus() {
+        document.activeElement = this;
+      },
+      dispatchEvent() {},
+      getBoundingClientRect() {
+        return { left: 0, top: 0, right: 100, bottom: 20 };
+      }
+    };
+    const makeNode = () => ({ text: editable.text, isConnected: true });
+    editable.node = makeNode();
+
+    let range = new FakeRange(editable.node, 0);
+    const selection = {
+      rangeCount: 1,
+      get isCollapsed() {
+        return range.collapsed;
+      },
+      getRangeAt() {
+        return range;
+      },
+      removeAllRanges() {
+        this.rangeCount = 0;
+      },
+      addRange(nextRange) {
+        range = nextRange;
+        this.rangeCount = 1;
+      },
+      modify(alter, direction) {
+        assert.equal(alter, "extend");
+        assert.equal(direction, "backward");
+        range = new FakeRange(range.endContainer, Math.max(0, range.endOffset - 1), range.endOffset);
+      }
+    };
+    let deleteCommands = 0;
+    let insertCommands = 0;
+    document.getSelection = () => selection;
+    document.createRange = () => new FakeRange(editable.node, 0);
+    document.execCommand = (command, _showUI, text = "") => {
+      if (command === "delete") {
+        deleteCommands += 1;
+        return true;
+      }
+      assert.equal(command, "insertText");
+      insertCommands += 1;
+      const current = selection.getRangeAt(0);
+      editable.text =
+        editable.text.slice(0, current.startOffset) + text + editable.text.slice(current.endOffset);
+      editable.node.text = editable.text;
+      const caret = current.startOffset + text.length;
+      selection.removeAllRanges();
+      selection.addRange(new FakeRange(editable.node, caret));
+      return true;
+    };
+
+    await wait(TOGGLE_WAIT);
+    document.activeElement = editable;
+    await press("j", { ctrl: true, keyCode: 74 });
+    await press("k");
+    assert.equal(editable.text, "");
+    assert.equal(selection.rangeCount, 1);
+
+    await press("a");
+    assert.equal(editable.text, "か");
+    assert.equal(selection.rangeCount, 1);
+    assert.equal(selection.isCollapsed, true);
+    assert.equal(selection.getRangeAt(0).startOffset, 1);
+    assert.equal(insertCommands, 1);
+    assert.equal(deleteCommands, 0);
+  });
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
