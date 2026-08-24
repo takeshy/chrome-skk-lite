@@ -46,6 +46,10 @@ jobs:
         if: steps.check-tag.outputs.exists == 'false'
         run: node scripts/package.js
 
+      - name: Test GemiHub plugin adapter
+        if: steps.check-tag.outputs.exists == 'false'
+        run: node tests/gemihub_plugin.test.js
+
       - name: Rename release archive
         if: steps.check-tag.outputs.exists == 'false'
         env:
@@ -60,4 +64,8 @@ jobs:
           name: ${{ steps.version.outputs.tag }}
           draft: true
           generate_release_notes: true
-          files: build/chrome-skk-lite-${{ steps.version.outputs.tag }}.zip
+          files: |
+            build/chrome-skk-lite-${{ steps.version.outputs.tag }}.zip
+            build/gemihub-skk-lite/manifest.json
+            build/gemihub-skk-lite/main.js
+            build/gemihub-skk-lite/dictionary.json

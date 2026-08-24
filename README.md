@@ -2,6 +2,9 @@
 
 Chromeのページ内入力欄だけで動く、SKK風の最小実装です。
 
+同じ入力エンジンをGemiHub Desktop Pluginとしても利用できます。GemiHub版は
+アプリ内の入力欄だけを対象とし、クリップボード入力窓は含みません。
+
 ![SKK Lite for Chrome Inputs のデモ](chrome-skk.gif)
 
 管理者権限がないなどの理由で OS の IME を install できない環境でも、Chrome の入力欄で SKK を使えるようにすることを主な目的にしています。
@@ -119,5 +122,22 @@ GitHub Actions などは不要です。手元の環境で辞書を取得して�
 - Chrome にそのまま読み込める最小構成を `build/chrome-skk-lite` に出力
 
 `build/chrome-skk-lite` に入るのは、拡張実行に必要なファイルと `compiled/dictionary.json` だけです。
+
+### GemiHub Desktop Plugin
+
+Gemihub DesktopというAI機能つきメモ、ファイル管理アプリにも対応しています。[gemihub-desktop](https://github.com/takeshy/gemihub-desktop)
+公開済みReleaseは、GemiHub Desktopの `Settings > Plugins` で
+`takeshy/chrome-skk-lite` を指定するとpreview・installできます。Pluginを有効にした後、
+アプリ内の入力欄で `Ctrl+J` を押すとSKKかな入力へ切り替わります。
+
+ローカルでPlugin配布物を作る場合は、辞書を生成した後に次を実行します。
+
+```sh
+node scripts/build_gemihub_plugin.js
+```
+
+`build/gemihub-skk-lite` に `manifest.json`、`main.js`、`dictionary.json` が生成されます。
+GemiHub版は辞書をPlugin assetとして初回利用時に取得し、ユーザー辞書、候補の学習履歴、
+状態表示の位置をWorkspaceのPlugin storageへ保存します。入力内容を外部へ送信しません。
 
 使用する辞書を変更したい場合は、`dictionary_sources.json` の `dictionaries` を編集してから、同じコマンドを再実行してください。

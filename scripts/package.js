@@ -44,6 +44,9 @@ function main() {
   console.log("Building extension...");
   execSync("node build_extension.js", { stdio: "inherit", cwd: ROOT });
 
+  console.log("Building GemiHub plugin...");
+  execSync("node scripts/build_gemihub_plugin.js", { stdio: "inherit", cwd: ROOT });
+
   if (fs.existsSync(ZIP_FILE)) {
     fs.unlinkSync(ZIP_FILE);
   }
