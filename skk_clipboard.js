@@ -47,6 +47,8 @@
 
   let userDict = {};
   let candidateHistory = {};
+  const UNDO_LIMIT = 200;
+  let undoStack = [];
   let registerKey = "";
   const lookupCache = new Map();
 
@@ -285,12 +287,29 @@
     state.cursor = 0;
     state.selectionEnd = state.text.length;
     render();
-    // render() collapses the visible selection; re-apply it so the highlight
-    // shows. The model selection (cursor !== selectionEnd) survives the
-    // subsequent `select` event via syncSelectionFromInput().
-    if (typeof inputEl.setSelectionRange === "function") {
-      inputEl.setSelectionRange(0, state.text.length);
-    }
+  }
+
+  function recordUndo(mutate) {
+    const before = state.text;
+    const beforeCursor = state.cursor;
+    mutate();
+    if (state.text === before) return;
+    undoStack.push({ text: before, cursor: beforeCursor });
+    if (undoStack.length > UNDO_LIMIT) undoStack = undoStack.slice(-UNDO_LIMIT);
+  }
+
+  function performUndo() {
+    const snapshot = undoStack.pop();
+    if (!snapshot) return;
+    resetComposition();
+    state.text = snapshot.text;
+    state.cursor = clampTextIndex(snapshot.cursor);
+    state.selectionEnd = state.cursor;
+    render();
+  }
+
+  function isUndoKeyEvent(e) {
+    return e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === "z";
   }
 
   function renderCandidateHint() {
@@ -370,13 +389,27 @@
   function render() {
     const selection = normalizedTextSelection();
     const preedit = currentPreeditText();
-    const value = state.text.slice(0, selection.start) + preedit + state.text.slice(selection.end);
-    const cursor = selection.start + preedit.length;
-    updateInputValue(value);
-    if (inputEl.selectionStart !== cursor || inputEl.selectionEnd !== cursor) {
-      inputEl.selectionStart = inputEl.selectionEnd = cursor;
+    let value;
+    let selectionStart;
+    let selectionEnd;
+    if (preedit.length) {
+      value = state.text.slice(0, selection.start) + preedit + state.text.slice(selection.end);
+      selectionStart = selectionEnd = selection.start + preedit.length;
+    } else {
+      value = state.text;
+      selectionStart = selection.start;
+      selectionEnd = selection.end;
     }
-    if (cursor === value.length) {
+    updateInputValue(value);
+    if (inputEl.selectionStart !== selectionStart || inputEl.selectionEnd !== selectionEnd) {
+      if (typeof inputEl.setSelectionRange === "function") {
+        inputEl.setSelectionRange(selectionStart, selectionEnd);
+      } else {
+        inputEl.selectionStart = selectionStart;
+        inputEl.selectionEnd = selectionEnd;
+      }
+    }
+    if (selectionEnd === value.length) {
       inputEl.scrollTop = inputEl.scrollHeight;
     }
     updateMode();
@@ -1198,6 +1231,12 @@
     return (e.key.charCodeAt(0) | 32) === 106;
   }
 
+  function isEscapeKeyEvent(e) {
+    if (e.key === "Escape") return true;
+    if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return false;
+    return e.key === "[" || e.code === "BracketLeft" || e.keyCode === 219;
+  }
+
   function isCancelCandidateKeyEvent(e) {
     if (!e.ctrlKey || e.altKey || e.metaKey) return false;
     const code = e.keyCode;
@@ -1421,6 +1460,7 @@
 
     try {
       await navigator.clipboard.writeText(text);
+      undoStack = [];
       statusEl.textContent = "Copied.";
       setTimeout(() => window.close(), 100);
     } catch {
@@ -1430,6 +1470,18 @@
 
   inputEl.addEventListener("keydown", (e) => {
     syncSelectionFromInput();
+
+    if (isUndoKeyEvent(e)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      performUndo();
+      return;
+    }
+
+    recordUndo(() => handleMainKeydown(e));
+  }, true);
+
+  function handleMainKeydown(e) {
 
     if (isToggleKeyEvent(e)) {
       e.preventDefault();
@@ -1497,6 +1549,22 @@
       return;
     }
 
+    if (isEscapeKeyEvent(e)) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (isAbbrevMode()) {
+        closeAbbrev("");
+        return;
+      }
+      if (state.composing || state.roman) {
+        resetComposition();
+        render();
+        return;
+      }
+      window.close();
+      return;
+    }
+
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
     if ((state.asciiMode || state.wideAscii) && ASCII_PRINTABLE_RE.test(e.key)) {
@@ -1522,21 +1590,6 @@
         }
         return;
       }
-    }
-
-    if (e.key === "Escape") {
-      e.preventDefault();
-      if (isAbbrevMode()) {
-        closeAbbrev("");
-        return;
-      }
-      if (state.composing || state.roman) {
-        resetComposition();
-        render();
-        return;
-      }
-      window.close();
-      return;
     }
 
     if (e.key === "/" && !state.composing && !state.roman && !isAbbrevMode()) {
@@ -1648,11 +1701,15 @@
     if (handlePrintable(e)) return;
 
     if (handleLiteralAscii(e)) return;
-  }, true);
+  }
 
   inputEl.addEventListener("paste", (e) => {
     e.preventDefault();
     syncSelectionFromInput();
+    recordUndo(() => handlePaste(e));
+  });
+
+  function handlePaste(e) {
 
     const pastedText = e.clipboardData?.getData("text/plain") ?? "";
 
@@ -1675,6 +1732,22 @@
 
     replaceSelectedText(pastedText);
     render();
+  }
+
+  inputEl.addEventListener("cut", (e) => {
+    e.preventDefault();
+    syncSelectionFromInput();
+    if (currentPreeditText()) return;
+    const selection = normalizedTextSelection();
+    if (selection.start === selection.end) return;
+    const text = state.text.slice(selection.start, selection.end);
+    recordUndo(() => {
+      replaceSelectedText("");
+      render();
+    });
+    navigator.clipboard.writeText(text).catch(() => {
+      statusEl.textContent = "Copy failed.";
+    });
   });
 
   inputEl.addEventListener("beforeinput", (e) => {
@@ -1801,8 +1874,9 @@
       return;
     }
 
-    if (e.key === "Escape") {
+    if (isEscapeKeyEvent(e)) {
       e.preventDefault();
+      e.stopImmediatePropagation();
       closeRegisterModal();
       return;
     }

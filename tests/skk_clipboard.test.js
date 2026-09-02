@@ -78,13 +78,16 @@ globalThis.window = {
   }
 };
 
-globalThis.navigator = {
-  clipboard: {
-    async writeText(text) {
-      copiedText = text;
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: {
+    clipboard: {
+      async writeText(text) {
+        copiedText = text;
+      }
     }
   }
-};
+});
 
 globalThis.chrome = {
   runtime: {
@@ -602,10 +605,54 @@ async function runTest(name, fn) {
   await runTest("Ctrl+O selects all and typing replaces the buffer", async () => {
     pasteText("replace me");
     await press("o", { ctrl: true });
+    assert.equal(input.value, "replace me");
     assert.equal(input.selectionStart, 0);
     assert.equal(input.selectionEnd, 10);
+    input.listeners.select();
+    assert.equal(input.value, "replace me");
     await type("ai");
     assert.equal(input.value, "あい");
+  });
+
+  await runTest("cut updates the model and Ctrl+Z restores it", async () => {
+    pasteText("abcdef");
+    input.selectionStart = 2;
+    input.selectionEnd = 4;
+    input.listeners.select();
+    const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    input.listeners.cut(event);
+    await flush();
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(copiedText, "cd");
+    assert.equal(input.value, "abef");
+    await press("z", { ctrl: true });
+    assert.equal(input.value, "abcdef");
+  });
+
+  await runTest("Ctrl+Z undoes committed-text edits one step at a time", async () => {
+    pasteText("あいうえお");
+    input.selectionStart = input.selectionEnd = 3;
+    await press("k", { ctrl: true });
+    assert.equal(input.value, "あいう");
+    await type("a");
+    assert.equal(input.value, "あいうあ");
+    await press("z", { ctrl: true });
+    assert.equal(input.value, "あいう");
+    await press("z", { ctrl: true });
+    assert.equal(input.value, "あいうえお");
+  });
+
+  await runTest("Ctrl+[ behaves like Escape in the main and register inputs", async () => {
+    await type("Kanji");
+    await press("[", { ctrl: true, keyCode: 219 });
+    assert.equal(input.value, "");
+    assert.equal(closed, false);
+
+    await type("Nai");
+    await press(" ");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+    await pressRegister("[", { ctrl: true, keyCode: 219 });
+    assert.equal(elements["register-overlay"].dataset.open, "false");
   });
 
   await runTest("Emacs keys are inert while composing", async () => {
