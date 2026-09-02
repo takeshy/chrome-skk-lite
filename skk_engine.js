@@ -20,6 +20,11 @@
   const ABBREV_PREFIX = "▽/";
   const OKURI_MARKER = "*";
 
+  // Status-bar hints, switched by context (mirrors omarchy engine.go
+  // defaultStatus / candidateStatus).
+  const IDLE_STATUS = "Space: convert / Enter: copy / Ctrl+O: select all";
+  const CANDIDATE_STATUS = "Space: next / Enter: commit / x: previous";
+
   const KANA_TABLE = {
     "-": "ー", ",": "、", ".": "。", "[": "「", "]": "」",
     "a": "あ", "i": "い", "u": "う", "e": "え", "o": "お",
@@ -115,9 +120,13 @@
 
   function foldOkuriIntoStem(state) {
     if (!state.okuriKey && !state.okuriKana) return false;
+    state.roman = "";
     state.kana = (state.kana || "") + (state.okuriKana || "");
     state.okuriKey = "";
     state.okuriKana = "";
+    state.stickyOkuri = false;
+    invalidateCandidates(state);
+    state.showingCandidate = false;
     state.replacedLength = composingPreedit(state).length;
     return true;
   }
@@ -293,11 +302,73 @@
     return "ん";
   }
 
+  // ---- committed-text line geometry (mirror omarchy internal/skk/lines.go) --
+
+  function lineStartOfPos(text, pos) {
+    const p = Math.max(0, Math.min(text.length, pos));
+    const i = text.lastIndexOf("\n", p - 1);
+    return i === -1 ? 0 : i + 1;
+  }
+
+  function lineEndOfPos(text, pos) {
+    const p = Math.max(0, Math.min(text.length, pos));
+    const i = text.indexOf("\n", p);
+    return i === -1 ? text.length : i;
+  }
+
+  // killLineAt cuts from pos to the end of the line (dir > 0) or to the
+  // start of the line (dir < 0). Cutting forward while the caret sits
+  // exactly at the end of a line eats the newline and joins the two lines
+  // (mirror omarchy engine.go killLine; there is no kill-ring).
+  function killLineAt(text, pos, dir) {
+    const p = Math.max(0, Math.min(text.length, pos));
+    if (dir > 0) {
+      let end = lineEndOfPos(text, p);
+      if (end === p && end < text.length) end += 1;
+      return { text: text.slice(0, p) + text.slice(end), cursor: p };
+    }
+    const start = lineStartOfPos(text, p);
+    return { text: text.slice(0, start) + text.slice(p), cursor: start };
+  }
+
+  // shouldAutoConvertOkuri is the shared guard the main buffer and the
+  // register dialog both use to fire a conversion the moment the okurigana
+  // is complete (mirror omarchy autoConvertOkuri / autoConvertRegisterOkuri).
+  function shouldAutoConvertOkuri(state) {
+    return (
+      !!state.composing &&
+      !!state.okuriKey &&
+      !!state.okuriKana &&
+      !state.roman &&
+      !(Array.isArray(state.candidates) && state.candidates.length)
+    );
+  }
+
+  // registerReadingInfo describes how the word-registration dialog should
+  // present the reading it was opened for (mirror omarchy openRegisterModal
+  // + state.go RegisterState.Reading/Okuri):
+  //   key     - dictionary storage key, unchanged (e.g. "はげr")
+  //   reading - friendly display: "はげ*る" for okuri-ari, else the key
+  //   okuri   - the okurigana ("る") the engine re-appends on commit, or ""
+  function registerReadingInfo(state) {
+    const key = lookupKey(state) || preeditKana(state);
+    if (state.okuriKey) {
+      return {
+        key,
+        reading: (state.kana || "") + OKURI_MARKER + (state.okuriKana || ""),
+        okuri: state.okuriKana || ""
+      };
+    }
+    return { key, reading: key, okuri: "" };
+  }
+
   return {
     STATE,
     HENKAN_PREFIX,
     ABBREV_PREFIX,
     OKURI_MARKER,
+    IDLE_STATUS,
+    CANDIDATE_STATUS,
     KANA_TABLE,
     SMALL_TSU_RE,
     lookupKey,
@@ -313,6 +384,11 @@
     composingOffsetAfterBackspace,
     consumeRomanChunk,
     consumePendingN,
+    lineStartOfPos,
+    lineEndOfPos,
+    killLineAt,
+    shouldAutoConvertOkuri,
+    registerReadingInfo,
     applyNumericCandidate,
     toHalfWidthKatakana
   };
