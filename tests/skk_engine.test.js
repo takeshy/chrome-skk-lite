@@ -315,3 +315,79 @@ runTest("half-width katakana conversion handles voiced marks", () => {
   assert.equal(engine.toHalfWidthKatakana("パーティー"), "ﾊﾟｰﾃｨｰ");
   assert.equal(engine.toHalfWidthKatakana("ヴ、。"), "ｳﾞ､｡");
 });
+
+runTest("fold also clears pending roman, candidates and candidate view", () => {
+  const state = createState();
+  state.kana = "かんが";
+  state.okuriKey = "e";
+  state.okuriKana = "え";
+  state.roman = "z";
+  state.candidates = ["考え"];
+  state.candidateIndex = 1;
+  state.showingCandidate = true;
+
+  const folded = engine.foldOkuriIntoStem(state);
+
+  assert.equal(folded, true);
+  assert.equal(state.kana, "かんがえ");
+  assert.equal(state.roman, "");
+  assert.deepEqual(state.candidates, []);
+  assert.equal(state.candidateIndex, 0);
+  assert.equal(state.showingCandidate, false);
+  assert.equal(engine.composingPreedit(state), "▽かんがえ");
+});
+
+runTest("line geometry finds line start and end around a position", () => {
+  const text = "ab\ncd\nef";
+
+  assert.equal(engine.lineStartOfPos(text, 0), 0);
+  assert.equal(engine.lineStartOfPos(text, 2), 0);
+  assert.equal(engine.lineStartOfPos(text, 3), 3);
+  assert.equal(engine.lineStartOfPos(text, 5), 3);
+  assert.equal(engine.lineStartOfPos(text, 6), 6);
+  assert.equal(engine.lineStartOfPos(text, text.length), 6);
+
+  assert.equal(engine.lineEndOfPos(text, 0), 2);
+  assert.equal(engine.lineEndOfPos(text, 2), 2);
+  assert.equal(engine.lineEndOfPos(text, 3), 5);
+  assert.equal(engine.lineEndOfPos(text, 6), 8);
+  assert.equal(engine.lineEndOfPos(text, text.length), 8);
+
+  assert.equal(engine.lineStartOfPos("no newline", 4), 0);
+  assert.equal(engine.lineEndOfPos("no newline", 4), 10);
+});
+
+runTest("killLineAt cuts to line end or start and eats the newline at EOL", () => {
+  assert.deepEqual(engine.killLineAt("hello\nworld", 8, 1), { text: "hello\nwo", cursor: 8 });
+  assert.deepEqual(engine.killLineAt("hello\nworld", 5, 1), { text: "helloworld", cursor: 5 });
+  assert.deepEqual(engine.killLineAt("hello\nworld", 11, 1), { text: "hello\nworld", cursor: 11 });
+  assert.deepEqual(engine.killLineAt("hello\nworld", 8, -1), { text: "hello\nrld", cursor: 6 });
+  assert.deepEqual(engine.killLineAt("hello\nworld", 6, -1), { text: "hello\nworld", cursor: 6 });
+});
+
+runTest("shouldAutoConvertOkuri only fires once the okurigana is complete", () => {
+  const base = { composing: true, okuriKey: "r", okuriKana: "る", roman: "", candidates: [] };
+
+  assert.equal(engine.shouldAutoConvertOkuri(base), true);
+  assert.equal(engine.shouldAutoConvertOkuri({ ...base, roman: "k" }), false);
+  assert.equal(engine.shouldAutoConvertOkuri({ ...base, candidates: ["走る"] }), false);
+  assert.equal(engine.shouldAutoConvertOkuri({ ...base, composing: false }), false);
+  assert.equal(engine.shouldAutoConvertOkuri({ ...base, okuriKana: "" }), false);
+  assert.equal(engine.shouldAutoConvertOkuri({ ...base, okuriKey: "" }), false);
+});
+
+runTest("registerReadingInfo presents okuri-ari readings with the * marker", () => {
+  assert.deepEqual(
+    engine.registerReadingInfo({ kana: "はげ", okuriKey: "r", okuriKana: "る" }),
+    { key: "はげr", reading: "はげ*る", okuri: "る" }
+  );
+  assert.deepEqual(
+    engine.registerReadingInfo({ kana: "みてい", okuriKey: "", okuriKana: "" }),
+    { key: "みてい", reading: "みてい", okuri: "" }
+  );
+});
+
+runTest("status hint strings are exposed for both front-ends", () => {
+  assert.equal(engine.IDLE_STATUS, "Space: convert / Enter: copy / Ctrl+O: select all");
+  assert.equal(engine.CANDIDATE_STATUS, "Space: next / Enter: commit / x: previous");
+});

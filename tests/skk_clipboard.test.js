@@ -4,6 +4,7 @@ const DICT = {
   "かんじ": ["感じ", "漢字"],
   "ちょう>": ["超"],
   "もt": ["持"],
+  "かえr": ["変"],
   ">てき": ["的"]
 };
 
@@ -35,6 +36,11 @@ class FakeElement {
   setRangeText(text, start, end) {
     this.value = this.value.slice(0, start) + text + this.value.slice(end);
     this.rangeTextUpdates += 1;
+  }
+
+  setSelectionRange(start, end) {
+    this.selectionStart = start;
+    this.selectionEnd = end;
   }
 }
 
@@ -312,7 +318,7 @@ async function runTest(name, fn) {
   await runTest("missing okuri candidates open registration", async () => {
     await type("YoutuumoTi");
     assert.equal(elements["register-overlay"].dataset.open, "true");
-    assert.equal(elements["register-reading"].textContent, "ようつうもt");
+    assert.equal(elements["register-reading"].textContent, "ようつうも*ち");
 
     elements["register-input"].value = "腰痛持";
     elements["register-save"].listeners.click();
@@ -336,6 +342,20 @@ async function runTest(name, fn) {
     await press(" ");
     await press("g", { ctrl: true, keyCode: 71 });
     assert.equal(input.value, "▽かんじ");
+  });
+
+  await runTest("Ctrl+G folds an okuri-ari reading back into one heading", async () => {
+    // Start okurigana input (uppercase mid-word) but stop before the vowel
+    // lands, so auto-conversion has not fired yet.
+    await type("KangaS");
+    await press("g", { ctrl: true, keyCode: 71 });
+    assert.equal(input.value, "▽かんが");
+    // The folded reading now converts as a single okuri-nasi heading.
+    await press(" ");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+    assert.equal(elements["register-reading"].textContent, "かんが");
+    elements["register-cancel"].listeners.click();
+    await flush();
   });
 
   await runTest("missing candidates can be registered from the clipboard window", async () => {
@@ -414,6 +434,43 @@ async function runTest(name, fn) {
     const event = await pressRegister("g", { ctrl: true });
     assert.equal(event.defaultPrevented, true);
     assert.equal(elements["register-overlay"].dataset.open, "false");
+  });
+
+  await runTest("Ctrl+G unwinds the registration dialog one step at a time", async () => {
+    await type("Mikakuteidankai");
+    await press(" ");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+
+    await typeRegister("Kanji");
+    assert.equal(elements["register-input"].value, "▽かんじ");
+    await pressRegister(" ");
+    assert.equal(elements["register-input"].value, "感じ");
+
+    // 1) drop the candidate, back to the ▽ reading
+    await pressRegister("g", { ctrl: true });
+    assert.equal(elements["register-input"].value, "▽かんじ");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+
+    // 2) drop the composition
+    await pressRegister("g", { ctrl: true });
+    assert.equal(elements["register-input"].value, "");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+
+    // 3) nothing left: close the dialog
+    await pressRegister("g", { ctrl: true });
+    assert.equal(elements["register-overlay"].dataset.open, "false");
+  });
+
+  await runTest("the registration dialog auto-converts once the okurigana is complete", async () => {
+    await type("Henkantouroku");
+    await press(" ");
+    assert.equal(elements["register-overlay"].dataset.open, "true");
+
+    await typeRegister("KaeRu");
+    assert.equal(elements["register-input"].value, "変る");
+    assert.equal(elements["register-candidate"].textContent, "変る");
+
+    elements["register-cancel"].listeners.click();
   });
 
   await runTest("the registration field supports wide ascii input", async () => {
@@ -507,6 +564,63 @@ async function runTest(name, fn) {
     await press("z");
     await press(" ");
     assert.equal(input.value, "←↓↑→　");
+  });
+
+  await runTest("Emacs caret keys move within the committed text", async () => {
+    pasteText("abcdef");
+    input.selectionStart = input.selectionEnd = 3;
+    await press("b", { ctrl: true });
+    assert.equal(input.selectionStart, 2);
+    await press("f", { ctrl: true });
+    assert.equal(input.selectionStart, 3);
+    await press("a", { ctrl: true });
+    assert.equal(input.selectionStart, 0);
+    await press("e", { ctrl: true });
+    assert.equal(input.selectionStart, 6);
+  });
+
+  await runTest("Ctrl+A / Ctrl+E respect line boundaries", async () => {
+    pasteText("hello\nworld");
+    input.selectionStart = input.selectionEnd = 9;
+    await press("a", { ctrl: true });
+    assert.equal(input.selectionStart, 6);
+    await press("e", { ctrl: true });
+    assert.equal(input.selectionStart, 11);
+  });
+
+  await runTest("Ctrl+K kills to end of line and joins at EOL; Ctrl+U kills to line start", async () => {
+    pasteText("hello\nworld");
+    input.selectionStart = input.selectionEnd = 5; // end of the first line
+    await press("k", { ctrl: true });
+    assert.equal(input.value, "helloworld");
+    input.selectionStart = input.selectionEnd = 5;
+    await press("u", { ctrl: true });
+    assert.equal(input.value, "world");
+    assert.equal(input.selectionStart, 0);
+  });
+
+  await runTest("Ctrl+O selects all and typing replaces the buffer", async () => {
+    pasteText("replace me");
+    await press("o", { ctrl: true });
+    assert.equal(input.selectionStart, 0);
+    assert.equal(input.selectionEnd, 10);
+    await type("ai");
+    assert.equal(input.value, "あい");
+  });
+
+  await runTest("Emacs keys are inert while composing", async () => {
+    await type("Kanji");
+    await press("a", { ctrl: true });
+    assert.equal(input.value, "▽かんじ");
+  });
+
+  await runTest("the status hint switches with candidate context", async () => {
+    const engine = require("../skk_engine.js");
+    await type("Kanji");
+    await press(" ");
+    assert.equal(elements.status.textContent, engine.CANDIDATE_STATUS);
+    await press("j", { ctrl: true, keyCode: 74 }); // commit
+    assert.equal(elements.status.textContent, engine.IDLE_STATUS);
   });
 
   await press("Enter");
