@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 
 const DICT = {
   "かんじ": ["感じ", "漢字"],
+  "わたし": ["私"],
   "ちょう>": ["超"],
   "もt": ["持"],
   "かえr": ["変"],
@@ -11,7 +12,7 @@ const DICT = {
 class FakeElement {
   constructor(id) {
     this.id = id;
-    this.value = "";
+    this._value = "";
     this.textContent = "";
     this.dataset = {};
     this.listeners = {};
@@ -20,6 +21,15 @@ class FakeElement {
     this.rangeTextUpdates = 0;
     this.scrollTop = 0;
     this.scrollHeight = 1000;
+  }
+
+  get value() {
+    return this._value;
+  }
+
+  set value(value) {
+    // textarea's API value uses LF even when clipboard text uses CRLF.
+    this._value = String(value).replace(/\r\n?/g, "\n");
   }
 
   addEventListener(type, listener) {
@@ -313,6 +323,15 @@ async function runTest(name, fn) {
     assert.equal(input.value, "abXYef");
   });
 
+  await runTest("typing after a CRLF paste uses the visual caret position", async () => {
+    pasteText("ab\r\ncd");
+    assert.equal(input.value, "ab\ncd");
+
+    input.selectionStart = input.selectionEnd = 4;
+    await type("ka");
+    assert.equal(input.value, "ab\ncかd");
+  });
+
   await runTest("okuri conversion auto-selects after okuri kana", async () => {
     await type("MoTi");
     assert.equal(input.value, "持ち");
@@ -338,6 +357,13 @@ async function runTest(name, fn) {
     await press(" ");
     await type("na");
     assert.equal(input.value, "感じな");
+  });
+
+  await runTest("literal punctuation after a candidate commits it and is preserved", async () => {
+    await type("Watashi");
+    await press(" ");
+    await type("(no(");
+    assert.equal(input.value, "私(の(");
   });
 
   await runTest("Ctrl+G cancels candidate selection back to preedit", async () => {

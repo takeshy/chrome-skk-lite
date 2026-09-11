@@ -1315,7 +1315,12 @@
   }
 
   function handleLiteralAscii(e) {
-    if (state.composing || isAbbrevMode() || !ASCII_PRINTABLE_RE.test(e.key)) return false;
+    if (isAbbrevMode() || !ASCII_PRINTABLE_RE.test(e.key)) return false;
+
+    if (state.composing) {
+      if (!state.showingCandidate) return false;
+      commitCandidate();
+    }
 
     e.preventDefault();
     appendText(e.key);
@@ -1711,7 +1716,10 @@
 
   function handlePaste(e) {
 
-    const pastedText = e.clipboardData?.getData("text/plain") ?? "";
+    // A textarea normalizes CRLF/CR line endings to LF. Keep the model in the
+    // same form or every Windows-style newline shifts its cursor offsets by
+    // one compared with selectionStart/selectionEnd.
+    const pastedText = (e.clipboardData?.getData("text/plain") ?? "").replace(/\r\n?/g, "\n");
 
     if (isAbbrevMode()) {
       closeAbbrev(state.abbrev);
