@@ -1569,42 +1569,49 @@
     return merged;
   }
 
-  async function lookup(kana) {
-    if (lookupCache.has(kana)) {
-      return lookupCache.get(kana);
+  function candidateHistoryKey(key, okuri = "") {
+    return okuri ? `${key}*${okuri}` : key;
+  }
+
+  async function lookup(kana, okuri = "") {
+    // Legacy okuri-ari history cannot distinguish e.g. おおk*き from おおk*く.
+    const historyKey = candidateHistoryKey(kana, okuri);
+    const cacheKey = JSON.stringify([kana, okuri]);
+    if (lookupCache.has(cacheKey)) {
+      return lookupCache.get(cacheKey);
     }
 
     const lookupPromise = new Promise((resolve) => {
       const sent = sendRuntimeMessage({ type: "lookup", kana }, (response) => {
         if (chrome.runtime?.lastError) {
-          const merged = mergeCandidateLists([candidateHistory[kana] || [], userDict[kana] || []]);
-          lookupCache.set(kana, Promise.resolve(merged));
+          const merged = mergeCandidateLists([candidateHistory[historyKey] || [], userDict[kana] || []]);
+          lookupCache.set(cacheKey, Promise.resolve(merged));
           resolve(merged);
           return;
         }
         const merged = mergeCandidateLists([
-          candidateHistory[kana] || [],
+          candidateHistory[historyKey] || [],
           userDict[kana] || [],
           response?.candidates || []
         ]);
-        lookupCache.set(kana, Promise.resolve(merged));
+        lookupCache.set(cacheKey, Promise.resolve(merged));
         resolve(merged);
       });
       if (!sent) {
-        const merged = mergeCandidateLists([candidateHistory[kana] || [], userDict[kana] || []]);
-        lookupCache.set(kana, Promise.resolve(merged));
+        const merged = mergeCandidateLists([candidateHistory[historyKey] || [], userDict[kana] || []]);
+        lookupCache.set(cacheKey, Promise.resolve(merged));
         resolve(merged);
       }
     });
-    lookupCache.set(kana, lookupPromise);
+    lookupCache.set(cacheKey, lookupPromise);
     return lookupPromise;
   }
 
-  async function lookupAny(keys) {
+  async function lookupAny(keys, okuri = "") {
     const merged = [];
     const seen = new Set();
     for (const { key, numbers } of keys) {
-      const candidates = await lookup(key);
+      const candidates = await lookup(key, okuri);
       for (const candidate of candidates) {
         const text = numbers ? engine.applyNumericCandidate(candidate, numbers) : candidate;
         const word = candidateWord(text);
@@ -1623,13 +1630,12 @@
     const existing = Array.isArray(nextCandidateHistory[key]) ? nextCandidateHistory[key] : [];
     nextCandidateHistory[key] = [candidate, ...existing.filter((item) => item !== candidate)].slice(0, 8);
     syncCandidateHistory(nextCandidateHistory);
-    lookupCache.delete(key);
     void storageSet({ candidateHistory: nextCandidateHistory });
   }
 
   function commitCandidate(el) {
     if (!state.composing) return;
-    const committedKey = lookupKey();
+    const committedKey = candidateHistoryKey(lookupKey(), state.okuriKana);
     const rawCandidate = state.showingCandidate ? state.candidates[state.candidateIndex] : "";
     const selectedCandidate = rawCandidate ? candidateWord(rawCandidate) : "";
     const text = state.showingCandidate ? candidateText() : preeditKana();
@@ -1863,7 +1869,7 @@
 
     const requestKey = lookupKey();
     const requestKeys = lookupKeys();
-    const candidates = await lookupAny(requestKeys);
+    const candidates = await lookupAny(requestKeys, state.okuriKana);
     if (
       !state.composing ||
       state.targetElement !== el ||
@@ -1898,7 +1904,7 @@
     if (!state.candidates.length) {
       const requestKey = lookupKey();
       const requestKeys = lookupKeys();
-      const candidates = await lookupAny(requestKeys);
+      const candidates = await lookupAny(requestKeys, state.okuriKana);
       if (
         !state.composing ||
         state.targetElement !== el ||
@@ -1996,11 +2002,12 @@
     if (!key || !word) return;
 
     const nextCandidateHistory = { ...candidateHistory };
-    if (Array.isArray(nextCandidateHistory[key])) {
-      nextCandidateHistory[key] = nextCandidateHistory[key].filter(
+    const historyKey = candidateHistoryKey(key, state.okuriKana);
+    if (Array.isArray(nextCandidateHistory[historyKey])) {
+      nextCandidateHistory[historyKey] = nextCandidateHistory[historyKey].filter(
         (item) => candidateWord(item) !== word
       );
-      if (!nextCandidateHistory[key].length) delete nextCandidateHistory[key];
+      if (!nextCandidateHistory[historyKey].length) delete nextCandidateHistory[historyKey];
     }
     syncCandidateHistory(nextCandidateHistory);
 

@@ -6,6 +6,7 @@ const DICT = {
   "ちょう>": ["超"],
   ">てき": ["的"],
   "はしr": ["走"],
+  "おおk": ["多", "大"],
   "だい#かい": ["第#1回", "第#3回"],
   "かんじ": ["感じ", "漢字"],
   "おおい": ["多い", "多飯", "大井", "覆い", "オオイ", "凡い", "鸁い", "飫い", "都比", "邑伊", "于"],
@@ -60,6 +61,8 @@ globalThis.document = {
     return true;
   }
 };
+let storedData = { candidateHistory: { "おおk": ["大"], "れきし": ["歴史"] } };
+
 globalThis.chrome = {
   runtime: {
     lastError: null,
@@ -76,10 +79,13 @@ globalThis.chrome = {
   storage: {
     local: {
       get(keys, callback) {
-        queueMicrotask(() => callback({}));
+        queueMicrotask(() => callback({ ...storedData }));
       },
       set(values, callback) {
-        queueMicrotask(() => callback?.());
+        queueMicrotask(() => {
+          storedData = { ...storedData, ...values };
+          callback?.();
+        });
       }
     },
     onChanged: { addListener() {} }
@@ -260,6 +266,52 @@ async function runTest(name, fn) {
     await type("ru");
     await press("Enter");
     assert.equal(input.value, "走る");
+  });
+
+  await runTest("candidate learning separates okurigana sharing a consonant", async () => {
+    await enableSkk();
+    await type("OoKu");
+    await press("Enter");
+    assert.equal(input.value, "多く"); // Ignore legacy history for おおk.
+    assert.deepEqual(storedData.candidateHistory["おおk*く"], ["多"]);
+
+    await enableSkk();
+    await type("OoKi");
+    await press(" ");
+    await press("Enter");
+    assert.equal(input.value, "大き");
+    await type("i");
+    assert.equal(input.value, "大きい");
+    assert.deepEqual(storedData.candidateHistory["おおk*き"], ["大"]);
+    assert.deepEqual(storedData.candidateHistory["おおk"], ["大"]);
+
+    await enableSkk();
+    await type("OoKi");
+    await press("Enter");
+    assert.equal(input.value, "大き");
+
+    await enableSkk();
+    await type("OoKu");
+    await press("Enter");
+    assert.equal(input.value, "多く");
+  });
+
+  await runTest("purging an okuri candidate removes only its matching history", async () => {
+    await enableSkk();
+    await type("OoKi");
+    await press("X", { shift: true });
+    assert.equal(storedData.candidateHistory["おおk*き"], undefined);
+    assert.deepEqual(storedData.candidateHistory["おおk*く"], ["多"]);
+    await press("Enter");
+  });
+
+  await runTest("existing history without okurigana still supplies candidates", async () => {
+    await enableSkk();
+    await type("Rekishi");
+    await press(" ");
+    await press("Enter");
+    assert.equal(input.value, "歴史");
+    assert.deepEqual(storedData.candidateHistory["れきし"], ["歴史"]);
   });
 
   await runTest("numeric reading converts with #1 entries", async () => {
