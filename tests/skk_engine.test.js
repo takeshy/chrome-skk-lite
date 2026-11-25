@@ -58,15 +58,40 @@ runTest("we composes to u-small-e", () => {
   assert.equal(engine.composingPreedit(state), "▽うぇ");
 });
 
-runTest("tye and che compose to chi-small-e", () => {
-  for (const roman of ["tye", "che"]) {
-    const state = createState();
-
-    typeRoman(state, roman);
-
-    assert.equal(state.kana, "ちぇ");
-    assert.equal(state.roman, "");
-    assert.equal(engine.composingPreedit(state), "▽ちぇ");
+runTest("kana rows accept all five vowels", () => {
+  const rows = {
+    ny: ["にゃ", "にぃ", "にゅ", "にぇ", "にょ"],
+    ky: ["きゃ", "きぃ", "きゅ", "きぇ", "きょ"],
+    gy: ["ぎゃ", "ぎぃ", "ぎゅ", "ぎぇ", "ぎょ"],
+    sy: ["しゃ", "しぃ", "しゅ", "しぇ", "しょ"],
+    sh: ["しゃ", "し", "しゅ", "しぇ", "しょ"],
+    ty: ["ちゃ", "ちぃ", "ちゅ", "ちぇ", "ちょ"],
+    cy: ["ちゃ", "ちぃ", "ちゅ", "ちぇ", "ちょ"],
+    ch: ["ちゃ", "ち", "ちゅ", "ちぇ", "ちょ"],
+    dy: ["ぢゃ", "ぢぃ", "ぢゅ", "ぢぇ", "ぢょ"],
+    jy: ["じゃ", "じぃ", "じゅ", "じぇ", "じょ"],
+    zy: ["じゃ", "じぃ", "じゅ", "じぇ", "じょ"],
+    j: ["じゃ", "じ", "じゅ", "じぇ", "じょ"],
+    hy: ["ひゃ", "ひぃ", "ひゅ", "ひぇ", "ひょ"],
+    by: ["びゃ", "びぃ", "びゅ", "びぇ", "びょ"],
+    py: ["ぴゃ", "ぴぃ", "ぴゅ", "ぴぇ", "ぴょ"],
+    my: ["みゃ", "みぃ", "みゅ", "みぇ", "みょ"],
+    ry: ["りゃ", "りぃ", "りゅ", "りぇ", "りょ"],
+    xy: ["ゃ", "ぃ", "ゅ", "ぇ", "ょ"],
+    fy: ["ふゃ", "ふぃ", "ふゅ", "ふぇ", "ふょ"],
+    vy: ["ゔゃ", "ゔぃ", "ゔゅ", "ゔぇ", "ゔょ"],
+    y: ["や", "い", "ゆ", "いぇ", "よ"],
+    w: ["わ", "うぃ", "う", "うぇ", "を"],
+    ts: ["つぁ", "つぃ", "つ", "つぇ", "つぉ"],
+  };
+  for (const [prefix, row] of Object.entries(rows)) {
+    for (const [i, kana] of row.entries()) {
+      const roman = prefix + "aiueo"[i];
+      const state = createState();
+      typeRoman(state, roman);
+      assert.equal(engine.composingPreedit(state), "▽" + kana, roman);
+      assert.equal(state.roman, "", roman);
+    }
   }
 });
 

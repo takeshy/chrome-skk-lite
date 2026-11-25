@@ -640,9 +640,19 @@
     });
     registerModalEls.input.addEventListener("keydown", (e) => {
       if (e.defaultPrevented) return;
-      if (e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === "g") {
+      if (isCancelCandidateKeyEvent(e)) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        if (state.roman) {
+          cancelPendingRoman(registerModalEls.input);
+          state.roman = "";
+          return;
+        }
+        const reading = state.modalContext;
+        if (reading?.composing && !reading.showingCandidate && !reading.candidates.length &&
+            engine.foldOkuriIntoStem(reading)) {
+          reading.mode = engine.STATE.SKK_HENKAN;
+        }
         closeRegisterModal(true);
         return;
       }
@@ -2033,12 +2043,20 @@
     showCandidate(el);
   }
 
-  function cancelCandidateSelection(el) {
+  function cancelConversionStep(el) {
     if (!state.composing) return false;
     setTargetElement(el);
-    showPreedit(el);
+    const inRegister = isRegisterInputElement(el);
+    if (!state.showingCandidate && !engine.foldOkuriIntoStem(state) && inRegister) {
+      replaceRendered(el, "");
+      clearCompositionState();
+      updateIndicator();
+      return true;
+    }
     state.candidates = [];
     state.candidateIndex = 0;
+    if (inRegister) hidePreeditPopup();
+    showPreedit(el);
     return true;
   }
 
@@ -2330,7 +2348,7 @@
     if (!isEdit) return;
 
     if (isCancelCandidateKeyEvent(e)) {
-      if (cancelCandidateSelection(el)) {
+      if (cancelConversionStep(el)) {
         e.preventDefault();
         e.stopImmediatePropagation();
       }

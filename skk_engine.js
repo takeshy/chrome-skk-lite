@@ -35,32 +35,33 @@
     "na": "な", "ni": "に", "nu": "ぬ", "ne": "ね", "no": "の",
     "ha": "は", "hi": "ひ", "fu": "ふ", "hu": "ふ", "he": "へ", "ho": "ほ",
     "ma": "ま", "mi": "み", "mu": "む", "me": "め", "mo": "も",
-    "ya": "や", "yu": "ゆ", "yo": "よ",
-    "xya": "ゃ", "xyu": "ゅ", "xyo": "ょ",
+    "ya": "や", "yi": "い", "yu": "ゆ", "ye": "いぇ", "yo": "よ",
     "ra": "ら", "ri": "り", "ru": "る", "re": "れ", "ro": "ろ",
-    "wa": "わ", "wi": "うぃ", "we": "うぇ", "wo": "を", "nn": "ん", "xtu": "っ",
+    "wa": "わ", "wi": "うぃ", "wu": "う", "we": "うぇ", "wo": "を", "nn": "ん", "xtu": "っ",
     "ga": "が", "gi": "ぎ", "gu": "ぐ", "ge": "げ", "go": "ご",
     "za": "ざ", "ji": "じ", "zi": "じ", "zu": "ず", "ze": "ぜ", "zo": "ぞ",
     "da": "だ", "di": "ぢ", "du": "づ", "de": "で", "do": "ど",
     "ba": "ば", "bi": "び", "bu": "ぶ", "be": "べ", "bo": "ぼ",
     "pa": "ぱ", "pi": "ぴ", "pu": "ぷ", "pe": "ぺ", "po": "ぽ",
-    "kya": "きゃ", "kyu": "きゅ", "kyo": "きょ",
-    "sha": "しゃ", "shu": "しゅ", "sho": "しょ",
-    "sya": "しゃ", "syu": "しゅ", "syo": "しょ",
+    "sha": "しゃ", "shu": "しゅ", "she": "しぇ", "sho": "しょ",
     "cha": "ちゃ", "chu": "ちゅ", "che": "ちぇ", "cho": "ちょ",
-    "tya": "ちゃ", "tyu": "ちゅ", "tye": "ちぇ", "tyo": "ちょ",
-    "nya": "にゃ", "nyu": "にゅ", "nyo": "にょ",
-    "hya": "ひゃ", "hyu": "ひゅ", "hyo": "ひょ",
-    "mya": "みゃ", "myu": "みゅ", "myo": "みょ",
-    "rya": "りゃ", "ryu": "りゅ", "ryo": "りょ",
-    "gya": "ぎゃ", "gyu": "ぎゅ", "gyo": "ぎょ",
+    "tsa": "つぁ", "tsi": "つぃ", "tse": "つぇ", "tso": "つぉ",
     "ja": "じゃ", "ju": "じゅ", "jo": "じょ", "je": "じぇ",
-    "jya": "じゃ", "jyu": "じゅ", "jyo": "じょ",
-    "bya": "びゃ", "byu": "びゅ", "byo": "びょ",
-    "pya": "ぴゃ", "pyu": "ぴゅ", "pyo": "ぴょ",
     "fa": "ふぁ", "fi": "ふぃ", "fe": "ふぇ", "fo": "ふぉ",
     "va": "ゔぁ", "vi": "ゔぃ", "vu": "ゔ", "ve": "ゔぇ", "vo": "ゔぉ"
   };
+
+  const yRowStems = {
+    ky: "き", gy: "ぎ", sy: "し", jy: "じ", zy: "じ",
+    ty: "ち", cy: "ち", dy: "ぢ", ny: "に", hy: "ひ",
+    by: "び", py: "ぴ", my: "み", ry: "り", fy: "ふ", vy: "ゔ", xy: ""
+  };
+  const yRowEndings = { a: "ゃ", i: "ぃ", u: "ゅ", e: "ぇ", o: "ょ" };
+  for (const [prefix, stem] of Object.entries(yRowStems)) {
+    for (const [vowel, ending] of Object.entries(yRowEndings)) {
+      KANA_TABLE[prefix + vowel] = stem + ending;
+    }
+  }
 
   const SMALL_TSU_RE = /^([bcdfghjklmpqrstvwxyz])\1/;
   const SMALL_TSU_CONSONANTS = new Set("bcdfghjklmpqrstvwxyz");

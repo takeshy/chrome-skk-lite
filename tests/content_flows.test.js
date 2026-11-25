@@ -6,6 +6,7 @@ const DICT = {
   "ちょう>": ["超"],
   ">てき": ["的"],
   "はしr": ["走"],
+  "はしる": ["走る"],
   "おおk": ["多", "大"],
   "だい#かい": ["第#1回", "第#3回"],
   "かんじ": ["感じ", "漢字"],
@@ -26,7 +27,8 @@ function fakeElement() {
       return { append() {}, appendChild() {} };
     },
     addEventListener() {},
-    querySelector() {
+    querySelector(selector) {
+      if (selector === ".input") return new FakeInput();
       return fakeElement();
     },
     getRootNode() {
@@ -37,6 +39,7 @@ function fakeElement() {
 }
 
 const keydownListeners = [];
+const createdElements = [];
 globalThis.window = { innerWidth: 1200, innerHeight: 800 };
 globalThis.InputEvent = class {
   constructor() {}
@@ -49,7 +52,9 @@ globalThis.document = {
     if (type === "keydown") keydownListeners.push(fn);
   },
   createElement() {
-    return fakeElement();
+    const element = fakeElement();
+    createdElements.push(element);
+    return element;
   },
   getSelection() {
     return null;
@@ -116,7 +121,11 @@ class FakeInput {
     this.selectionEnd = end;
   }
   dispatchEvent() {}
-  focus() {}
+  focus() { document.activeElement = this; }
+  select() { this.setSelectionRange(0, this.value.length); }
+  addEventListener(type, listener) {
+    if (type === "keydown") this.onKeydown = listener;
+  }
   getBoundingClientRect() {
     return { left: 0, top: 0, right: 100, bottom: 20 };
   }
@@ -132,6 +141,7 @@ function flush() {
 }
 
 async function press(key, opts = {}) {
+  const target = document.activeElement;
   const event = {
     key,
     ctrlKey: !!opts.ctrl,
@@ -143,11 +153,12 @@ async function press(key, opts = {}) {
     preventDefault() {
       this.defaultPrevented = true;
     },
-    stopImmediatePropagation() {}
+    stopImmediatePropagation() { this.stopped = true; }
   };
   for (const listener of keydownListeners) listener(event);
+  if (!event.stopped) target?.onKeydown?.(event);
   if (!event.defaultPrevented && key.length === 1 && !opts.ctrl) {
-    input.setRangeText(key, input.selectionStart, input.selectionEnd);
+    target.setRangeText(key, target.selectionStart, target.selectionEnd);
   }
   await flush();
   return event;
@@ -266,6 +277,57 @@ async function runTest(name, fn) {
     await type("ru");
     await press("Enter");
     assert.equal(input.value, "走る");
+  });
+
+  await runTest("Ctrl+G drops a pending okuri consonant and continues the same reading", async () => {
+    await enableSkk();
+    await type("HasiR");
+    const popup = createdElements.find((el) => el.className === "preedit");
+    assert.equal(popup.textContent, "▽はし*r");
+    assert.equal((await press("g", { ctrl: true })).defaultPrevented, true);
+    assert.equal(popup.textContent, "▽はし");
+    await type("ru");
+    await press(" ");
+    await press("Enter");
+    assert.equal(input.value, "走る");
+  });
+
+  await runTest("Ctrl+G cancels an okuri candidate before folding its kana", async () => {
+    await enableSkk();
+    await type("HasiRu");
+    const popup = createdElements.find((el) => el.className === "preedit");
+    assert.equal(popup.textContent, "走る");
+    await press("g", { ctrl: true });
+    assert.equal(popup.textContent, "▽はし*る");
+    await press("g", { ctrl: true });
+    assert.equal(popup.textContent, "▽はしる");
+    await press(" ");
+    await press("Enter");
+    assert.deepEqual(storedData.candidateHistory["はしる"], ["走る"]);
+  });
+
+  await runTest("Ctrl+G in registration unwinds okuri then folds the missing outer reading", async () => {
+    await enableSkk();
+    await type("KanJi"); // Only the okuri-nasi reading かんじ is in the dictionary.
+    const registerInput = document.activeElement;
+    assert.notEqual(registerInput, input);
+    await type("aHasiRu");
+    assert.equal(registerInput.value, "あ走る");
+    await press("g", { ctrl: true });
+    assert.equal(registerInput.value, "あ▽はし*る");
+    await press("g", { ctrl: true });
+    assert.equal(registerInput.value, "あ▽はしる");
+    await press("g", { ctrl: true });
+    assert.equal(registerInput.value, "あ");
+    await type("k");
+    await press("g", { ctrl: true });
+    assert.equal(registerInput.value, "あ");
+    assert.equal(document.activeElement, registerInput);
+    await press("g", { ctrl: true });
+    assert.equal(document.activeElement, input);
+    await press(" ");
+    await press("Enter");
+    assert.equal(input.value, "感じ");
   });
 
   await runTest("candidate learning separates okurigana sharing a consonant", async () => {
